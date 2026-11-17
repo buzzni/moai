@@ -423,8 +423,9 @@ fn issue(
 }
 
 /// A checkout's whole branch, narrowed to `path`. The list is read whole (it names the kind and the counts, and
-/// whether the file changed at all); the patch only for that file — or, for a renamed one, whole: git finds a rename
-/// only when both names are in the pathspec.
+/// whether the file changed at all); the patch only for that file or folder — a renamed file by both its names, since
+/// git finds a rename only when both are in the pathspec, and a folder with the other names of the renames that cross
+/// its edge (`vcs::Backend::patch_of`, moai-sgzk).
 fn whole(checkout: &Checkout, path: Option<&str>, budget: Option<Duration>, lang: Lang) -> Loaded {
     let root = checkout.path.as_path();
     let started = Instant::now();
@@ -443,9 +444,9 @@ fn whole(checkout: &Checkout, path: Option<&str>, budget: Option<Duration>, lang
     };
     let list_cut = changes.truncated;
     let total = changes.total;
-    let mut ask = None;
-    // A folder takes every file below it, by either name. Its patch is read whole and cut to those files after: a
-    // folder pathspec would leave out the untracked files below it (`vcs` matches those by their whole name).
+    let mut ask: Vec<String> = Vec::new();
+    // A folder takes every file below it, by either name; the pathspec names the folder and the other side of each
+    // rename across its edge. A file takes its rows by either name, and the pathspec both names of each.
     let folder = path.and_then(|p| p.strip_suffix('/'));
     let below = |p: &str, dir: &str| p.strip_prefix(dir).is_some_and(|t| t.starts_with('/'));
     if let Some(dir) = folder {
@@ -453,16 +454,26 @@ fn whole(checkout: &Checkout, path: Option<&str>, budget: Option<Duration>, lang
         if changes.files.is_empty() {
             return Loaded { unchanged: true, total, ..Loaded::default() };
         }
+        ask.push(format!("{dir}/"));
+        for c in &changes.files {
+            ask.extend(std::iter::once(&c.path).chain(&c.old_path).filter(|n| !below(n, dir)).cloned());
+        }
     } else if let Some(p) = path {
         changes.files.retain(|c| c.path == p || c.old_path.as_deref() == Some(p));
         if changes.files.is_empty() {
             return Loaded { unchanged: true, total, ..Loaded::default() };
         }
-        if !changes.files.iter().any(|c| matches!(c.status, Status::Renamed | Status::Copied)) {
-            ask = Some(p);
+        ask.push(p.to_owned());
+        for c in &changes.files {
+            ask.extend(std::iter::once(&c.path).chain(&c.old_path).filter(|n| n.as_str() != p).cloned());
         }
     }
-    let got = match backend.patch_with_changes(root, &vcs::Scope::Whole, ask, left(), &changes) {
+    let got = if ask.is_empty() {
+        backend.patch_with_changes(root, &vcs::Scope::Whole, None, left(), &changes)
+    } else {
+        backend.patch_of(root, &vcs::Scope::Whole, &ask, left(), Some(&changes))
+    };
+    let got = match got {
         Ok(p) => p,
         Err(e) => {
             let f = told(root, lang, e);

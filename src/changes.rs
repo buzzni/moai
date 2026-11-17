@@ -186,12 +186,21 @@ impl Prepared {
                 Some(told(root, self.lang, vcs::Error::Git(git::Error::Failed("not a git repository".into()))));
             return Ok(answer);
         };
+        // A renamed file is read by both names: Git narrows to the pathspec before it looks for renames, so the new name
+        // alone would show the whole file as added. The old name comes from the list, never from the caller.
+        let names: Option<Vec<String>> = path.map(|p| {
+            std::iter::once(p.to_owned()).chain(changes.files.iter().filter_map(|c| c.old_path.clone())).collect()
+        });
         let mut raw = String::new();
         let mut patch_cut = false;
         if offer.scope == Scope::Commits {
             for commit in &self.commits {
                 let scope = vcs::Scope::Commits(vec![commit.hash.clone()]);
-                match backend.patch(root, &scope, path, remaining()) {
+                let read = match &names {
+                    Some(names) => backend.patch_of(root, &scope, names, remaining(), None),
+                    None => backend.patch(root, &scope, None, remaining()),
+                };
+                match read {
                     Ok(patch) if !patch.text.is_empty() => {
                         // A subject is anyone's text; `moai show` sanitizes it before a terminal sees it too.
                         let subject = crate::text::sanitize(&commit.subject);
@@ -210,7 +219,12 @@ impl Prepared {
                 }
             }
         } else {
-            match backend.patch_with_changes(root, &self.vcs_scope(offer.scope), path, remaining(), &changes) {
+            let scope = self.vcs_scope(offer.scope);
+            let read = match &names {
+                Some(names) => backend.patch_of(root, &scope, names, remaining(), Some(&changes)),
+                None => backend.patch_with_changes(root, &scope, None, remaining(), &changes),
+            };
+            match read {
                 Ok(patch) => {
                     raw = patch.text;
                     patch_cut |= patch.truncated;

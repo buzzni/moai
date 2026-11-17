@@ -305,6 +305,22 @@ fn add_numstat(change: &mut Change, adds: &str, dels: &str) {
         change.dels = dels.parse::<usize>().ok().map(|n| change.dels.unwrap_or(0).saturating_add(n));
     }
 }
+fn untracked_of(changes: &Changes) -> Vec<String> {
+    changes.files.iter().filter(|c| c.status == Status::Untracked).map(|c| c.path.clone()).collect()
+}
+/// How many bytes of names one patch read may put on Git's command line. Windows caps a whole command line at 32,767
+/// characters; this leaves room for the rest of the arguments and the root's path.
+pub(crate) const PATHSPEC_LIMIT: usize = 16 * 1024;
+fn past_pathspec_limit(paths: &[String]) -> bool {
+    paths.iter().fold(0usize, |n, p| n.saturating_add(p.len() + 1)) > PATHSPEC_LIMIT
+}
+/// Whether the pathspec `spec` — a file, or a folder with its trailing `/` — takes `name`.
+fn covers(spec: &str, name: &str) -> bool {
+    match spec.strip_suffix('/') {
+        Some(dir) => name.strip_prefix(dir).is_some_and(|t| t.starts_with('/')),
+        None => spec == name,
+    }
+}
 // Filesystem operations can block independently of Git (for example on a dead mount).
 // A timed caller must be released even when such a system call cannot be interrupted.
 fn timed<T: Send + 'static>(
@@ -417,7 +433,7 @@ impl Backend {
         path: Option<&str>,
         budget: Option<Duration>,
     ) -> Result<Patch, Error> {
-        self.patch_known(root, scope, path, budget, None)
+        self.patch_known(root, scope, path.map(|p| vec![p.to_owned()]), budget, None)
     }
     pub fn patch_with_changes(
         self,
@@ -427,34 +443,54 @@ impl Backend {
         budget: Option<Duration>,
         changes: &Changes,
     ) -> Result<Patch, Error> {
-        let names = changes.files.iter().filter(|c| c.status == Status::Untracked).map(|c| c.path.clone()).collect();
-        self.patch_known(root, scope, path, budget, Some(names))
+        self.patch_known(root, scope, path.map(|p| vec![p.to_owned()]), budget, Some(untracked_of(changes)))
+    }
+    /// The patch of some files and folders only — a folder is named with its trailing `/` and takes every file below
+    /// it, untracked ones too. Give a renamed file by both of its names: Git narrows to the pathspec before it looks
+    /// for renames, so the new name alone reads as a whole new file. `changes`, when given, names the untracked files
+    /// as [`Backend::patch_with_changes`] does. An empty list is refused rather than read as "everything".
+    pub fn patch_of(
+        self,
+        root: &Path,
+        scope: &Scope,
+        paths: &[String],
+        budget: Option<Duration>,
+        changes: Option<&Changes>,
+    ) -> Result<Patch, Error> {
+        if paths.is_empty() {
+            return Err(Error::InvalidPath);
+        }
+        self.patch_known(root, scope, Some(paths.to_vec()), budget, changes.map(untracked_of))
     }
     fn patch_known(
         self,
         root: &Path,
         scope: &Scope,
-        path: Option<&str>,
+        paths: Option<Vec<String>>,
         budget: Option<Duration>,
         known: Option<Vec<String>>,
     ) -> Result<Patch, Error> {
         let root = root.to_path_buf();
         let scope = scope.clone();
-        let path = path.map(str::to_owned);
-        timed(budget, move || self.patch_inner(&root, &scope, path.as_deref(), budget, known))
+        timed(budget, move || self.patch_inner(&root, &scope, paths.as_deref(), budget, known))
     }
     fn patch_inner(
         self,
         root: &Path,
         scope: &Scope,
-        path: Option<&str>,
+        paths: Option<&[String]>,
         budget: Option<Duration>,
         known: Option<Vec<String>>,
     ) -> Result<Patch, Error> {
         let deadline = budget.and_then(|d| std::time::Instant::now().checked_add(d));
-        if path.is_some_and(|p| !valid_path(p)) {
+        // A folder is checked without its one trailing slash; every name — an old name from the list too — is
+        // someone's text and reaches Git only as a literal pathspec after `--`.
+        if paths.is_some_and(|ps| ps.iter().any(|p| !valid_path(p.strip_suffix('/').unwrap_or(p)))) {
             return Err(Error::InvalidPath);
         }
+        // Past the limit the names do not go on the command line: the scope is read whole and the callers keep their
+        // files' hunks, as they did before. A slow answer is better than a wrong one.
+        let narrow = paths.filter(|ps| !past_pathspec_limit(ps));
         let mut out = Vec::new();
         let mut truncated = false;
         let revs = revisions(root, scope, budget)?;
@@ -484,8 +520,8 @@ impl Backend {
                 args.push(&current);
             }
             args.push("--");
-            if let Some(p) = path {
-                args.push(p);
+            if let Some(ps) = narrow {
+                args.extend(ps.iter().map(String::as_str));
             }
             let (data, cut) = run(root, &args, PATCH_LIMIT.saturating_sub(out.len()), budget)?;
             out.extend(data);
@@ -499,7 +535,7 @@ impl Backend {
                 Some(names) => names,
                 None => untracked(root, budget)?,
             };
-            for name in names.into_iter().filter(|n| path.is_none_or(|p| p == n)) {
+            for name in names.into_iter().filter(|n| paths.is_none_or(|ps| ps.iter().any(|p| covers(p, n)))) {
                 if deadline.is_some_and(|d| std::time::Instant::now() >= d) {
                     return Err(Error::Timeout);
                 }
@@ -1290,6 +1326,157 @@ mod tests {
         let c = Backend::Git.changes(&main, &Scope::Whole, None).unwrap();
         let m = Backend::Git.marks(&main, &c, None);
         assert_eq!(dirs_of(&m), [("proj", "M"), ("proj/new", "A")]);
+    }
+    /// The hunks of `name` in a patch: by its new name, or by its old one when it was deleted.
+    fn hunks_of(text: &str, name: &str) -> Vec<crate::diff::Hunk> {
+        crate::diff::parse(text)
+            .into_iter()
+            .filter(|f| {
+                f.new_path.as_deref() == Some(name) || (f.new_path.is_none() && f.old_path.as_deref() == Some(name))
+            })
+            .flat_map(|f| f.hunks)
+            .collect()
+    }
+    fn counted(hunks: &[crate::diff::Hunk]) -> (usize, usize) {
+        use crate::diff::LineKind;
+        let lines = hunks.iter().flat_map(|h| &h.lines);
+        let adds = lines.clone().filter(|l| l.kind == LineKind::Add).count();
+        (adds, lines.filter(|l| l.kind == LineKind::Delete).count())
+    }
+    fn body(tag: &str) -> String {
+        (0..20).map(|n| format!("{tag} line {n}\n")).collect()
+    }
+    #[test]
+    fn one_renamed_file_reads_by_both_names_in_every_scope() {
+        let dir = crate::scratch::Scratch::new("vcs-rename-one");
+        let main = dir.join("main");
+        let side = dir.join("side");
+        fs::create_dir(&main).unwrap();
+        let git = |root: &Path, args: &[&str]| run_git(root, None, args);
+        git(&main, &["init", "-q"]);
+        fs::write(main.join("-old\nname"), body("a")).unwrap();
+        fs::write(main.join("other"), "other\n").unwrap();
+        git(&main, &["add", "."]);
+        git(&main, &["commit", "-qm", "base"]);
+        git(&main, &["branch", "milestone/m1"]);
+        git(&main, &["worktree", "add", "-qb", "feature", side.to_str().unwrap(), "milestone/m1"]);
+        // One commit renames, the next edits three lines under the new name.
+        git(&side, &["mv", "--", "-old\nname", "new"]);
+        git(&side, &["commit", "-qm", "rename"]);
+        let renamed = head(&side, None).unwrap();
+        fs::write(side.join("new"), body("a").replacen("a line 3", "b line 3", 1).replacen("a line 9", "b 9", 1))
+            .unwrap();
+        fs::write(side.join("other"), "changed\n").unwrap();
+        git(&side, &["commit", "-qam", "edit"]);
+        let edited = head(&side, None).unwrap();
+        let names = vec!["new".to_owned(), "-old\nname".to_owned()];
+        let scopes = [
+            Scope::Commits(vec![renamed.clone(), edited.clone()]),
+            Scope::Branch,
+            Scope::Whole,
+            Scope::Commits(vec![edited.clone()]),
+        ];
+        for scope in &scopes {
+            let list = Backend::Git.changes(&side, scope, None).unwrap();
+            let row = list.files.iter().find(|c| c.path == "new").unwrap();
+            let got = Backend::Git.patch_of(&side, scope, &names, None, Some(&list)).unwrap();
+            let whole = Backend::Git.patch(&side, scope, None, None).unwrap();
+            let hunks = hunks_of(&got.text, "new");
+            assert_eq!(hunks, hunks_of(&whole.text, "new"), "{scope:?}");
+            assert_eq!(Some(counted(&hunks).0), row.adds, "{scope:?}");
+            assert_eq!(Some(counted(&hunks).1), row.dels, "{scope:?}");
+            assert!(counted(&hunks).0 < 5, "{scope:?} read the renamed file as a whole new one: {}", got.text);
+            assert!(!got.text.contains("changed"), "{scope:?} read the whole scope");
+        }
+        // A commit at a time, as `moai diff` reads a commit range: both names on each still give each its hunks.
+        let first = Backend::Git.patch_of(&side, &Scope::Commits(vec![renamed]), &names, None, None).unwrap();
+        assert!(first.text.contains("rename from"), "{}", first.text);
+        let second = Backend::Git.patch_of(&side, &Scope::Commits(vec![edited]), &names, None, None).unwrap();
+        assert_eq!(counted(&hunks_of(&second.text, "new")), (2, 2));
+        // Working tree: an unstaged rename stays a deleted file and an untracked one; staged, both names find it.
+        git(&side, &["mv", "new", "newer"]);
+        fs::write(side.join("newer"), body("a")).unwrap();
+        let list = Backend::Git.changes(&side, &Scope::Working, None).unwrap();
+        let row = list.files.iter().find(|c| c.path == "newer").unwrap();
+        assert_eq!(row.status, Status::Renamed);
+        let names = vec!["newer".to_owned(), "new".to_owned()];
+        let got = Backend::Git.patch_of(&side, &Scope::Working, &names, None, Some(&list)).unwrap();
+        assert_eq!(counted(&hunks_of(&got.text, "newer")), (row.adds.unwrap(), row.dels.unwrap()));
+    }
+    #[test]
+    fn a_folder_reads_its_files_untracked_and_crossing_renames_only() {
+        let dir = crate::scratch::Scratch::new("vcs-folder");
+        let root: &Path = &dir;
+        let git = |args: &[&str]| run_git(root, None, args);
+        git(&["init", "-q"]);
+        for f in ["src/a", "src/in-out", "out-in", "src2/x", "top"] {
+            fs::create_dir_all(root.join(f).parent().unwrap()).unwrap();
+            fs::write(root.join(f), body(f)).unwrap();
+        }
+        git(&["add", "."]);
+        git(&["commit", "-qm", "base"]);
+        fs::write(root.join("src/a"), body("src/a").replacen("line 2", "LINE 2", 1)).unwrap();
+        fs::write(root.join("src2/x"), "next door\n").unwrap();
+        fs::write(root.join("top"), "top changed\n").unwrap();
+        git(&["mv", "src/in-out", "moved-out"]);
+        git(&["mv", "out-in", "src/moved-in"]);
+        fs::create_dir(root.join("src/deep")).unwrap();
+        fs::write(root.join("src/deep/new"), "untracked below\n").unwrap();
+        fs::write(root.join("src2/new"), "untracked next door\n").unwrap();
+        fs::write(root.join("loose"), "untracked outside\n").unwrap();
+        let list = Backend::Git.changes(root, &Scope::Whole, None).unwrap();
+        let below = |p: &str| p.strip_prefix("src").is_some_and(|t| t.starts_with('/'));
+        let mut rows = list.clone();
+        rows.files.retain(|c| below(&c.path) || c.old_path.as_deref().is_some_and(below));
+        let mut ask = vec!["src/".to_owned()];
+        for c in &rows.files {
+            ask.extend(std::iter::once(&c.path).chain(&c.old_path).filter(|n| !below(n)).cloned());
+        }
+        assert_eq!(ask, ["src/", "moved-out", "out-in"]);
+        let got = Backend::Git.patch_of(root, &Scope::Whole, &ask, None, Some(&rows)).unwrap();
+        let whole = Backend::Git.patch_with_changes(root, &Scope::Whole, None, None, &list).unwrap();
+        for c in &rows.files {
+            assert_eq!(hunks_of(&got.text, &c.path), hunks_of(&whole.text, &c.path), "{}", c.path);
+            assert_eq!(counted(&hunks_of(&got.text, &c.path)), (c.adds.unwrap(), c.dels.unwrap()), "{}", c.path);
+        }
+        assert!(got.text.contains("untracked below"));
+        for outside in ["next door", "untracked next door", "untracked outside", "top changed"] {
+            assert!(!got.text.contains(outside), "{outside} is not in src/");
+        }
+        // Past the limit the names stay off the command line: the scope is read whole, still the same hunks.
+        let many: Vec<String> =
+            ask.iter().cloned().chain((0..PATHSPEC_LIMIT / 8).map(|n| format!("x{n:06}"))).collect();
+        assert!(past_pathspec_limit(&many));
+        assert!(!past_pathspec_limit(&ask));
+        let fell = Backend::Git.patch_of(root, &Scope::Whole, &many, None, Some(&rows)).unwrap();
+        assert!(fell.text.contains("top changed"), "past the limit the scope is read whole");
+        assert!(!fell.text.contains("untracked outside"), "the untracked files still follow the names");
+        for c in &rows.files {
+            assert_eq!(hunks_of(&fell.text, &c.path), hunks_of(&got.text, &c.path), "{}", c.path);
+        }
+    }
+    #[test]
+    fn names_reach_git_only_as_literal_paths() {
+        let dir = crate::scratch::Scratch::new("vcs-names");
+        let root: &Path = &dir;
+        let git = |args: &[&str]| run_git(root, None, args);
+        git(&["init", "-q"]);
+        fs::write(root.join("a"), "a\n").unwrap();
+        git(&["add", "."]);
+        git(&["commit", "-qm", "base"]);
+        fs::write(root.join("a"), "b\n").unwrap();
+        for bad in ["../x", ".git/config", "", "/abs", "a/../../x", "/"] {
+            let names = vec!["a".to_owned(), bad.to_owned()];
+            assert!(
+                matches!(Backend::Git.patch_of(root, &Scope::Working, &names, None, None), Err(Error::InvalidPath)),
+                "{bad:?}"
+            );
+        }
+        assert!(matches!(Backend::Git.patch_of(root, &Scope::Working, &[], None, None), Err(Error::InvalidPath)));
+        let names = vec!["a".to_owned(), "--output=evil".to_owned(), ":(top)a".to_owned()];
+        let got = Backend::Git.patch_of(root, &Scope::Working, &names, None, None).unwrap();
+        assert!(got.text.contains("+b"));
+        assert!(!root.join("evil").exists());
     }
     #[test]
     fn a_cut_list_says_so_in_its_marks() {

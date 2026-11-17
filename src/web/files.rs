@@ -349,12 +349,22 @@ fn checkout_changes(path: &str, checkout: &Checkout, file: Option<&str>, left: &
     if path == "/api/changes" {
         return ok(json!({"scope":"whole","files":changes.files,"total":changes.total,"truncated":changes.truncated}));
     }
-    let patch =
-        match backend.patch_with_changes(&checkout.path, &crate::vcs::Scope::Whole, file, Some(left()), &changes) {
-            Ok(p) => p,
-            Err(crate::vcs::Error::Timeout) => return refuse(504, "request timed out", code::TIMEOUT),
-            Err(_) => return missing(),
-        };
+    // A renamed file is read by both names, the old one from the list: the new name alone reads as a whole new file.
+    let names: Option<Vec<String>> = file.map(|p| {
+        std::iter::once(p.to_owned())
+            .chain(changes.files.iter().filter(|c| c.path == p).filter_map(|c| c.old_path.clone()))
+            .collect()
+    });
+    let whole = crate::vcs::Scope::Whole;
+    let read = match &names {
+        Some(names) => backend.patch_of(&checkout.path, &whole, names, Some(left()), Some(&changes)),
+        None => backend.patch_with_changes(&checkout.path, &whole, None, Some(left()), &changes),
+    };
+    let patch = match read {
+        Ok(p) => p,
+        Err(crate::vcs::Error::Timeout) => return refuse(504, "request timed out", code::TIMEOUT),
+        Err(_) => return missing(),
+    };
     let parsed = crate::diff::parse(&patch.text);
     let entries = changes
         .files

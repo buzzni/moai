@@ -36099,6 +36099,32 @@ fn diff_reads_commits_and_worktree_scopes_without_writing() {
 }
 
 #[test]
+fn diff_of_one_renamed_file_shows_only_the_lines_it_changed() {
+    let s = Scratch::new("diff-rename-path");
+    let root = s.path();
+    git(root, &["init", "-q"]);
+    ok(root, &["init", "argos"]);
+    let id = field(&ok(root, &["add", "issue", "--json"]), "id");
+    let text: String = (0..30).map(|n| format!("line {n}\n")).collect();
+    std::fs::write(root.join("before.txt"), &text).unwrap();
+    git(root, &["add", "-A"]);
+    git(root, &["commit", "-qm", "base"]);
+    git(root, &["mv", "before.txt", "after.txt"]);
+    std::fs::write(root.join("after.txt"), text.replace("line 7\n", "line seven\n")).unwrap();
+    git(root, &["commit", "-qam", &format!("feat: {id}")]);
+    let out = ok(root, &["diff", &id, "--scope=commits", "--path=after.txt"]);
+    assert!(out.contains("rename from before.txt"), "{out}");
+    assert!(out.contains("+line seven") && out.contains("-line 7"), "{out}");
+    assert!(!out.contains("+line 20"), "the renamed file read as a whole new one: {out}");
+    let json = json_of(&ok(root, &["diff", &id, "--scope=commits", "--path=after.txt", "--json"]));
+    let lines = json["files"][0]["hunks"].as_array().unwrap().iter().flat_map(|h| h["lines"].as_array().unwrap().clone());
+    assert_eq!(lines.filter(|l| l["kind"] == "add").count(), 1);
+    assert_eq!(json["files"][0]["adds"], 1);
+    // The old name is the list's, never the caller's.
+    assert!(!moai(root, &["diff", &id, "--scope=commits", "--path=before.txt"]).status.success());
+}
+
+#[test]
 fn diff_without_git_repository_returns_one_value_and_a_vcs_error() {
     let s = init("diff-no-git");
     let id = field(&ok(s.path(), &["add", "issue", "--json"]), "id");
