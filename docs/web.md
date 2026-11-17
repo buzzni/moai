@@ -103,6 +103,8 @@ The web client issues GET requests subject to existing project, Host, and Origin
 
 `/api/changes` and `/api/diff` accept either a checkout `root` or an issue `id`, using `scope=commits|branch|working` for issue queries. Issue queries may specify `worktree=1`; requested diff `path` entries must exist in the change list. Responses detail errors and truncation status, bound by a shared ten-second connection deadline across execution steps. Unrecognized and duplicate query parameters are rejected, except for repeated `dir` parameters on `/api/files-stamp`.
 
+Every file row in these responses carries a `mark` field with one of `M`, `A`, `D`, or `R`, folding Git's change kinds: untracked and copied files map to `A`, while type changes and conflicts map to `M`. A checkout's `/api/changes` endpoint additionally returns `dirs`, mapping each changed file's ancestor directory to its rollup mark: `A` when the directory is absent from the base tree, `D` when present in the base tree but deleted from disk, and `M` otherwise. If these directory states cannot be determined within the request budget, directories default to `M`. When invoked without `scope`, an issue's `/api/changes` returns the files belonging to the scope that `/api/diff` would select alongside `offers`, enabling the web client to render all file headers before requesting individual patches. Syntax highlighting never blocks diff responses: as the budget deadline approaches, any remaining files retain their full text and hunks with `spans: null`, and the response indicates `highlight` as `full`, `partial`, or `none`. Only a stalled Git read results in a 504.
+
 ## Markdown
 
 Issue bodies, history notes and wiki pages support CommonMark, tables,
