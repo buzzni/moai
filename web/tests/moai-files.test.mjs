@@ -204,3 +204,87 @@ test('browser shortcuts and the checkout select keep their keys', async () => {
   assert.equal(p.view.handleKey({ key: 'd', ctrlKey: true, target: body }), true)
   p.view.destroy(); p.dom.window.close()
 })
+
+// Changed-only raises the diff pane and leaves it as it found it (moai-dy7a.1yj).
+const roots2 = [{ key: '.', branch: 'main', main: true, current: true, issue: null }, { key: 'side', branch: 'side', main: false, current: false, issue: null }]
+function autoPage(extra = {}) {
+  const calls = []
+  const p = page(async ({ path, query }) => {
+    calls.push([path, query])
+    if (extra.hook) { const r = await extra.hook(path, query); if (r) return r }
+    if (path === '/api/files') return { kind: 'passed', output: { entries: [entry('a')], truncated: false } }
+    if (path === '/api/changes') return extra.failChanges ? { kind: 'failed' } : { kind: 'passed', output: { files: [{ path: 'a', status: 'modified', old_path: null, adds: 1, dels: 0, binary: false }] } }
+    if (path === '/api/diff') return { kind: 'passed', output: { files: [], truncated: false } }
+    return { kind: 'passed', output: { path: query?.path, text: '', binary: false, truncated: false, spans: null } }
+  }, roots2)
+  Object.defineProperty(p.root, 'clientWidth', { configurable: true, value: 1000 })
+  const pressed = name => p.root.querySelectorAll('.m-files-toolbar button')[name].getAttribute('aria-pressed')
+  return { p, calls, diffPressed: () => pressed(1), detailPressed: () => pressed(2), diffReads: () => calls.filter(([path]) => path === '/api/diff').length }
+}
+test('entering changed-only raises the diff pane and leaving lowers it', async () => {
+  const { p, diffPressed, diffReads } = autoPage()
+  p.view.render(p.state, null); await wait(20)
+  assert.equal(p.view.filesState().diff, false)
+  p.view.command('changed'); await wait(200)
+  assert.equal(p.view.filesState().diff, true); assert.equal(diffPressed(), 'true')
+  assert.ok(p.root.querySelector('.m-files-right > .m-diff')); assert.ok(diffReads() > 0)
+  assert.equal(p.view.filesState().detail, false)
+  p.view.command('changed'); await wait(20)
+  assert.equal(p.view.filesState().diff, false); assert.equal(diffPressed(), 'false')
+  assert.ok(p.root.querySelector('.m-files-right > .m-files-content'))
+  assert.equal(p.state.diff.visible, initialState().diff.visible)
+  p.view.destroy(); p.dom.window.close()
+})
+test('a diff pane the hand raised stays when changed-only is left', async () => {
+  const { p } = autoPage()
+  p.view.render(p.state, null); await wait(20)
+  p.view.command('diff'); p.view.command('changed'); await wait(30)
+  assert.equal(p.view.filesState().diff, true)
+  p.view.command('changed'); await wait(20)
+  assert.equal(p.view.filesState().diff, true)
+  p.view.destroy(); p.dom.window.close()
+})
+test('a hand on the diff pane inside changed-only keeps its value on leaving', async () => {
+  const { p } = autoPage()
+  p.view.render(p.state, null); await wait(20)
+  p.view.command('changed'); await wait(30); p.view.command('diff'); assert.equal(p.view.filesState().diff, false)
+  p.view.command('changed'); await wait(20); assert.equal(p.view.filesState().diff, false)
+  p.view.command('changed'); await wait(30); assert.equal(p.view.filesState().diff, true)
+  p.view.command('diff'); p.view.command('diff'); assert.equal(p.view.filesState().diff, true)
+  p.view.command('changed'); await wait(20)
+  assert.equal(p.view.filesState().diff, true)
+  p.view.destroy(); p.dom.window.close()
+})
+test('switching checkout leaves changed-only and lowers a pane it raised', async () => {
+  const { p } = autoPage()
+  p.view.render(p.state, null); await wait(20)
+  p.view.command('changed'); await wait(30); assert.equal(p.view.filesState().diff, true)
+  const select = p.root.querySelector('select'); select.value = 'side'; select.dispatchEvent(new p.dom.window.Event('change')); await wait(30)
+  assert.equal(p.view.filesState().changed, false); assert.equal(p.view.filesState().diff, false)
+  p.view.destroy(); p.dom.window.close()
+})
+test('a changes answer discarded by a checkout switch never raises the diff pane', async () => {
+  let release
+  const { p } = autoPage({ hook: async (path, query) => { if (path === '/api/changes' && query.root === '.') await new Promise(resolve => { release = resolve }) } })
+  p.view.render(p.state, null); await wait(20)
+  p.view.command('changed'); await wait(10)
+  const select = p.root.querySelector('select'); select.value = 'side'; select.dispatchEvent(new p.dom.window.Event('change')); await wait(30)
+  release(); await wait(30)
+  assert.equal(p.view.filesState().diff, false); assert.equal(p.view.filesState().changed, false)
+  p.view.destroy(); p.dom.window.close()
+})
+test('an unreadable change list neither enters changed-only nor raises the diff pane', async () => {
+  const { p, diffReads } = autoPage({ hook: async path => { if (path === '/api/changes') throw new Error('down') } })
+  p.view.render(p.state, null); await wait(20)
+  p.view.command('changed'); await wait(30)
+  assert.equal(p.view.filesState().changed, false); assert.equal(p.view.filesState().diff, false); assert.equal(diffReads(), 0)
+  p.view.destroy(); p.dom.window.close()
+})
+test('changed-only touches neither the list diff pane nor the remembered settings', async () => {
+  const { p } = autoPage()
+  const before = JSON.stringify(p.state)
+  p.view.render(p.state, null); await wait(20)
+  p.view.command('changed'); await wait(30); p.view.command('changed'); await wait(20)
+  assert.equal(JSON.stringify(p.state), before)
+  p.view.destroy(); p.dom.window.close()
+})

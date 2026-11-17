@@ -65,6 +65,11 @@ export function mountFiles(root: HTMLElement, ctx: ViewContext): PaneView {
   let changes: Change[] = [], ordinary: Map<string, Entry[]> | null = null, stateNow: State | null = null, indexNow: IssueIndex | null = null
   let issueShown: State['shown'] = { value: null, loading: false, problem: null }
   let diffEpoch = 0, issueEpoch = 0, changesLoaded = false, painting = 0
+  /** Changed-only raised the diff pane itself; any hand on the pane clears this, and leaving turns the pane off only while it stands. */
+  let autoDiff = false
+  function setDiff(on: boolean): void { diffOn = on; paintRight(); if (on) void showDiff(); watchChanged() }
+  /** Leaving changed-only: undo what entering did, and only that. */
+  function releaseDiff(): void { if (autoDiff) { autoDiff = false; if (diffOn) setDiff(false) } }
   let ordinaryExpanded = new Set<string>(), ordinaryBase = '.'
   /** Put `nodes` in `parent` only when they are not already its children: moving a pane drops its scroll and focus. */
   const place = (parent: HTMLElement, ...nodes: HTMLElement[]) => {
@@ -92,14 +97,14 @@ export function mountFiles(root: HTMLElement, ctx: ViewContext): PaneView {
   const watchChanged = () => root.dispatchEvent(new doc.defaultView!.Event('moai-file-watch', { bubbles: true }))
   async function switchCheckout(key: string): Promise<void> {
     if (!checkouts.some(c => c.key === key)) return
-    generation++; diffEpoch++; issueEpoch++; clearTimeout(timer); rootKey = key; chosen = ''; cursor = 0; base = '.'; matches = null; changes = []; changesLoaded = false; ordinary = null; changedOnly = false
+    generation++; diffEpoch++; issueEpoch++; clearTimeout(timer); rootKey = key; chosen = ''; cursor = 0; base = '.'; matches = null; changes = []; changesLoaded = false; ordinary = null; changedOnly = false; releaseDiff()
     directories.clear(); partial.clear(); stamps.clear(); readTimes.clear(); fileStamp = null; fileReadAt = 0; lastFile = null; lastDiff = '';  expanded.clear(); expanded.add('.'); content.replaceChildren(); diff.show({ files: [], truncated: false }); draw(); paintRight()
     try { await load('.'); if (rootKey === key) draw() } catch { message.textContent = words.directoryError; const current = checkouts.find(c => c.current); if (current && current.key !== key) { checkoutSelect.value = current.key; void switchCheckout(current.key) } }
     void readIssue(); watchChanged()
   }
   async function toggleChanged(): Promise<void> {
     if (!source || rootKey === undefined) return
-    if (changedOnly && ordinary) { directories.clear(); for (const [k, v] of ordinary) directories.set(k, v); ordinary = null; changedOnly = false; base = ordinaryBase; expanded.clear(); for (const name of ordinaryExpanded) expanded.add(name); cursor = 0; draw(); paintRight(); return }
+    if (changedOnly && ordinary) { directories.clear(); for (const [k, v] of ordinary) directories.set(k, v); ordinary = null; changedOnly = false; base = ordinaryBase; expanded.clear(); for (const name of ordinaryExpanded) expanded.add(name); cursor = 0; draw(); paintRight(); releaseDiff(); return }
     const key = rootKey; const result = await source.changes(key).catch(() => null)
     if (key !== rootKey) return
     if (!result) { message.textContent = words.readError; return }
@@ -108,6 +113,7 @@ export function mountFiles(root: HTMLElement, ctx: ViewContext): PaneView {
     else message.textContent = ''
     ordinary = new Map(directories); ordinaryExpanded = new Set(expanded); ordinaryBase = base; base = '.'; changesLoaded = true
     buildChanged(result.files); changedOnly = true; cursor = 0; draw(); paintRight(); watchChanged()
+    if (!diffOn) { autoDiff = true; setDiff(true) }
   }
   function buildChanged(next: Change[]): void {
     changes = next; directories.clear(); directories.set('.', []); expanded.clear(); expanded.add('.')
@@ -148,7 +154,7 @@ export function mountFiles(root: HTMLElement, ctx: ViewContext): PaneView {
     if (event.isComposing || event.key === 'Process' || (event.key.length === 1 && event.key !== ' ')) event.preventDefault()
   })
   changedButton.addEventListener('click', () => void toggleChanged())
-  diffButton.addEventListener('click', () => { diffOn = !diffOn; paintRight(); if (diffOn) void showDiff(); watchChanged() })
+  diffButton.addEventListener('click', () => { autoDiff = false; setDiff(!diffOn) })
   detailButton.addEventListener('click', () => { detailOn = !detailOn; paintRight(); if (detailOn) void readIssue(); watchChanged() })
   async function load(dir: string, limit?: number): Promise<number> {
     if (!source) return 0
