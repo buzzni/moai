@@ -86,7 +86,7 @@ pub fn answer(path: &str, cwd: &Path, lang: Lang, query: &[(String, String)]) ->
 fn answer_inner(path: &str, cwd: &Path, lang: Lang, query: &[(String, String)]) -> Response {
     let allowed: &[&str] = match path {
         "/api/checkouts" => &[],
-        "/api/files" => &["root", "dir"],
+        "/api/files" => &["root", "dir", "limit"],
         "/api/file" => &["root", "path"],
         "/api/files-stamp" => &["root", "dir", "path"],
         "/api/find" => &["root", "dir", "q"],
@@ -153,13 +153,24 @@ fn answer_inner(path: &str, cwd: &Path, lang: Lang, query: &[(String, String)]) 
         return denied();
     }
     match path {
-        "/api/files" => match files::list(&jail, dir) {
-            Ok(list) => ok(json!({"dir":dir,"stamp":stamp(list.stamp),"entries":list.entries.iter().map(|e| {
+        "/api/files" => {
+            let limit = match get("limit") {
+                Some(value) => match value.parse::<usize>() {
+                    Ok(n) if (1..=5000).contains(&n) => Some(n),
+                    _ => return bad(),
+                },
+                None => None,
+            };
+            match files::list(&jail, dir) {
+                Ok(list) => ok(
+                    json!({"dir":dir,"stamp":stamp(list.stamp),"truncated":limit.is_some_and(|n| list.entries.len() > n),"entries":list.entries.iter().take(limit.unwrap_or(usize::MAX)).map(|e| {
                 let (kind, link_dir, inside) = match e.kind { files::Kind::Dir => ("dir",false,false), files::Kind::File => ("file",false,false), files::Kind::Link {dir,inside} => ("link",dir,inside), files::Kind::Other => ("other",false,false) };
                 json!({"name":e.name,"kind":kind,"size":e.size,"dir":link_dir,"inside":inside,"openable":e.openable})
-            }).collect::<Vec<_>>() })),
-            Err(e) => failure(e),
-        },
+            }).collect::<Vec<_>>() }),
+                ),
+                Err(e) => failure(e),
+            }
+        }
         "/api/file" => {
             let Some(p) = get("path") else { return bad() };
             if !path_ok(p) {

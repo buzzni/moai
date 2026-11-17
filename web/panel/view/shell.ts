@@ -87,7 +87,7 @@ export interface Shell {
   setWidth(width: number): void
   layout(): PaneLayout
   /** The views in the panes, for the key router (panel/keys/wiring.ts) to hand its actions to. */
-  panes(): { list: PaneView; board: PaneView; gantt: PaneView; detail: PaneView; wiki: PaneView | null }
+  panes(): { list: PaneView; board: PaneView; gantt: PaneView; detail: PaneView; wiki: PaneView | null; files: PaneView | null }
   /** Move the keyboard focus into a pane of the shown tab (its view's focus()). */
   focusPane(area: Focus): void
   /** Move the keyboard focus to the selected tab of the tab bar: the way out of the wiki, whose Tab cycles its links. */
@@ -188,7 +188,7 @@ export function mountShell(root: HTMLElement, options: ShellOptions): Shell {
     el(doc, "div", { class: "m-tabbar-actions" }, refresh, themeButton, visibility, position.el, actions))
 
   // ── under the tab bar: toolbar slot, path line, banners, result line ──
-  const toolbar = el(doc, "div", { class: "m-toolbar-slot", hidden: state.tab === "wiki" })
+  const toolbar = el(doc, "div", { class: "m-toolbar-slot", hidden: state.tab === "wiki" || state.tab === "files" })
   // The toolbar is built once and brought to the store's state on every render (its inputs are never rebuilt
   // under the caret or an IME composition); what it does goes back to the store as a `toolbar` action.
   const bar = createToolbar({ doc, copy: copy.toolbar, lang: language as import("../i18n/index.ts").Language }, { dispatch: (action) => store.dispatch({ type: "toolbar", action }) })
@@ -227,7 +227,7 @@ export function mountShell(root: HTMLElement, options: ShellOptions): Shell {
   const notes = el(doc, "div", { class: "m-shell-notes" }, hint, away, slow, notice, error, said, archiveNotice, archiveError, result)
   // The path and banners belong to the list and board; the wiki tab brings its own head. A panel
   // that opens on the wiki tab (the remembered one) starts without it: showTab() only runs on a change of tab.
-  const head = el(doc, "div", { class: "m-shell-head", hidden: state.tab === "wiki" }, crumbs.el, notes)
+  const head = el(doc, "div", { class: "m-shell-head", hidden: state.tab === "wiki" || state.tab === "files" }, crumbs.el, notes)
 
   // ── body: one panel for the list and board (they share the cursor, path and detail), one for the wiki ──
   const split = createSplit(doc, {
@@ -252,10 +252,11 @@ export function mountShell(root: HTMLElement, options: ShellOptions): Shell {
   split.list.addEventListener("focusin", () => store.dispatch({ type: "focus", focus: "list" }))
   split.detail.addEventListener("focusin", () => store.dispatch({ type: "focus", focus: "detail" }))
   // The work tabs (list, board, gantt) control this one panel; its label follows the tab shown.
-  const work = el(doc, "div", { class: "m-tabpanel", role: "tabpanel", id: panelDomId("list"), hidden: state.tab === "wiki" }, split.el)
+  const work = el(doc, "div", { class: "m-tabpanel", role: "tabpanel", id: panelDomId("list"), hidden: state.tab === "wiki" || state.tab === "files" }, split.el)
   for (const id of ["board", "gantt"] as const) tabs.el.querySelector(`#${tabDomId(id)}`)?.setAttribute("aria-controls", panelDomId("list"))
   const wiki = el(doc, "div", { class: "m-tabpanel m-pane-wiki", role: "tabpanel", id: panelDomId("wiki"), "aria-labelledby": tabDomId("wiki"), tabindex: -1, hidden: state.tab !== "wiki" })
-  const body = el(doc, "div", { class: "m-body" }, work, wiki)
+  const files = el(doc, "div", { class: "m-tabpanel m-pane-files", role: "tabpanel", id: panelDomId("files"), "aria-labelledby": tabDomId("files"), tabindex: -1, hidden: state.tab !== "files" })
+  const body = el(doc, "div", { class: "m-body" }, work, wiki, files)
 
   // The activity stays on every tab (the wiki reads too), floating over the foot of the panes so a read never pushes
   // them (shell.css, se-24ey.14i).
@@ -293,6 +294,7 @@ export function mountShell(root: HTMLElement, options: ShellOptions): Shell {
     const now = store.getState()
     if (area === "detail") return detailView.focus ? detailView.focus() : detailRoot.focus()
     if (now.tab === "wiki") return wikiView?.focus ? wikiView.focus() : wiki.focus()
+    if (now.tab === "files") return filesView?.focus ? filesView.focus() : files.focus()
     const view = mainViews[now.tab]
     return view.focus ? view.focus() : mainRoots[now.tab].focus()
   }
@@ -305,6 +307,7 @@ export function mountShell(root: HTMLElement, options: ShellOptions): Shell {
   }
   const detailView = options.panes.detail(detailRoot, ctx)
   const wikiView = options.panes.wiki?.(wiki, ctx) ?? null
+  const filesView = options.panes.files?.(files, ctx) ?? null
   if (!wikiView) wiki.append(emptyState(doc, { icon: "book-open", title: copy.shell.wikiPlaceholder }))
   // Inside the wiki, Tab cycles the page's links, so a keyboard cannot Tab out of it: an Esc the wiki does not
   // use (no link selected, no search to clear) moves the focus to the tab bar. The key router does that
@@ -312,7 +315,7 @@ export function mountShell(root: HTMLElement, options: ShellOptions): Shell {
   const focusTabs = () => tabs.el.querySelector<HTMLElement>(`#${tabDomId(store.getState().tab)}`)?.focus()
 
   // ── tab switching: each tab keeps its scroll offsets (display:none drops them) ──
-  const containers: Record<Tab, HTMLElement> = { list: mainRoots.list, board: mainRoots.board, gantt: mainRoots.gantt, wiki }
+  const containers: Record<Tab, HTMLElement> = { list: mainRoots.list, board: mainRoots.board, gantt: mainRoots.gantt, wiki, files }
   const saved = new Map<Tab | "detail", Saved>()
   let shownTab: Tab = state.tab
   /** Show `tab`'s panes; returns the offsets to put back once they are drawn. */
@@ -323,9 +326,9 @@ export function mountShell(root: HTMLElement, options: ShellOptions): Shell {
     if (tab === "wiki") saved.set("detail", saveScroll(split.detail))
     containers[leaving].hidden = true
     containers[tab].hidden = false
-    work.hidden = tab === "wiki"
-    head.hidden = tab === "wiki"
-    toolbar.hidden = tab === "wiki"
+    work.hidden = tab === "wiki" || tab === "files"
+    head.hidden = tab === "wiki" || tab === "files"
+    toolbar.hidden = tab === "wiki" || tab === "files"
     shownTab = tab
     const offsets = saved.get(tab) ?? []
     restoreScroll(offsets.slice(0, 1))
@@ -415,6 +418,8 @@ export function mountShell(root: HTMLElement, options: ShellOptions): Shell {
 
     if (state.tab === "wiki") {
       wikiView?.render(state, index)
+    } else if (state.tab === "files") {
+      filesView?.render(state, index)
     } else {
       // What moai found and why it refused a filter are the toolbar's to show; it judges neither.
       const found = index && state.search.text.trim() !== "" ? narrow(state, index) : null
@@ -450,6 +455,7 @@ export function mountShell(root: HTMLElement, options: ShellOptions): Shell {
     // The wiki pane lays itself out from the width it is given when it renders (view/wiki.ts mountWiki): a narrow
     // panel stacks its list over the page.
     if (current.tab === "wiki") return wikiView?.render(current, options.index(current))
+    if (current.tab === "files") return filesView?.render(current, options.index(current))
     // The list drops right-hand columns as it narrows; draw it again only when a breakpoint is crossed.
     const now = columnBand(layout().mainWidth)
     if (now === band) return
@@ -486,7 +492,7 @@ export function mountShell(root: HTMLElement, options: ShellOptions): Shell {
     slots: { toolbar, actions },
     setWidth,
     layout,
-    panes: () => ({ list: mainViews.list, board: mainViews.board, gantt: mainViews.gantt, detail: detailView, wiki: wikiView }),
+    panes: () => ({ list: mainViews.list, board: mainViews.board, gantt: mainViews.gantt, detail: detailView, wiki: wikiView, files: filesView }),
     focusPane,
     focusTabs,
     toolbar: bar,
@@ -500,6 +506,7 @@ export function mountShell(root: HTMLElement, options: ShellOptions): Shell {
       mainViews.gantt.destroy?.()
       detailView.destroy?.()
       wikiView?.destroy?.()
+      filesView?.destroy?.()
       bar.destroy()
     },
   }

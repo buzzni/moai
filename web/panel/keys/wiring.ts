@@ -268,6 +268,10 @@ export function wireKeys(options: KeyWiringOptions): KeyWiring {
 
   // ── focus moves ──
   function focusTo(side: "next" | "prev" | "left" | "right" | "up" | "down") {
+    if (store.getState().tab === "files") {
+      panes().files?.command?.(`focus.${side}`)
+      return
+    }
     if (store.getState().tab === "wiki") {
       panes().wiki?.command?.(`focus.${side}`)
       return
@@ -457,6 +461,7 @@ export function wireKeys(options: KeyWiringOptions): KeyWiring {
     "tab.list": tab("list"),
     "tab.board": tab("board"),
     "tab.wiki": tab("wiki"),
+    "tab.files": tab("files"),
     "tab.gantt": tab("gantt"),
     "gantt.left": onMain,
     "gantt.right": onMain,
@@ -674,6 +679,9 @@ export function wireKeys(options: KeyWiringOptions): KeyWiring {
             return { handled: true, preventDefault: true }
           }
         }
+        if (store.getState().tab === "files" && router.state().menu === null && router.state().pending.length === 0 && current && panes().files?.handleKey?.(current)) {
+          return { handled: true, preventDefault: true }
+        }
         const result = router.handle(event)
         const path = router.state().menu
         if (path?.length === 2 && path[0] === 'SPC' && path[1] === 's' && !store.getState().toolbar.sortOpen) {
@@ -689,6 +697,9 @@ export function wireKeys(options: KeyWiringOptions): KeyWiring {
     },
   }, {
     intercept(event) {
+      if (!help.isOpen() && store.getState().tab === "files" && event.key === "Tab" && event.target instanceof doc.defaultView!.Node && shell.el.querySelector(".m-pane-files")?.contains(event.target) && router.state().menu === null && router.state().pending.length === 0 && panes().files?.handleKey?.(event as KeyboardEvent)) {
+        event.preventDefault(); return true
+      }
       if (!help.isOpen()) return false
       if (event.key === "Escape" || event.key === "Esc") {
         event.preventDefault()

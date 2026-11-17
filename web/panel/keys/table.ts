@@ -42,7 +42,7 @@ export type CellField = "id" | "priority" | "assignee" | "created" | "updated" |
 export interface KeyContext {
   mode: Mode
   /** Selected tab. */
-  tab?: "list" | "board" | "wiki" | "gantt"
+  tab?: "list" | "board" | "wiki" | "gantt" | "files"
   /** Focused pane. Browse: 'list' | 'detail'. Wiki: 'list' | 'page'. */
   focus?: "list" | "detail" | "page"
   /** Detail pane shown (SPC v d). Default true. */
@@ -75,7 +75,7 @@ export interface KeyContext {
 }
 
 export type StateId =
-  | "shown" | "hidden" | "asc" | "desc" | "right" | "top" | "left" | "bottom" | "raw" | "rendered" | "list" | "board" | "wiki" | "gantt"
+  | "shown" | "hidden" | "asc" | "desc" | "right" | "top" | "left" | "bottom" | "raw" | "rendered" | "list" | "board" | "wiki" | "gantt" | "files"
 
 /** The words when a caller passes none. */
 const DEFAULT_WORDS: KeyTableCopy = TABLE.ko
@@ -95,7 +95,7 @@ export type KeyLabel =
   | "wiki.halfDown" | "wiki.halfUp"
   | "focus.next" | "focus.prev" | "focus.left" | "focus.right" | "focus.up" | "focus.down"
   | "enter" | "leave" | "expand" | "collapse" | "expandAll" | "search" | "clear" | "read" | "help"
-  | "filter" | "tab.list" | "tab.board" | "tab.wiki" | "tab.gantt"
+  | "filter" | "tab.list" | "tab.board" | "tab.wiki" | "tab.gantt" | "tab.files"
   | "gantt.left" | "gantt.right" | "gantt.zoomIn" | "gantt.zoomOut" | "gantt.today" | "gantt.fit"
   | "view.deferred" | "view.backlog" | "view.archived" | "view.worktree" | "view.all" | "view.allHelp" | "view.detail" | "view.raw" | "view.rawHelp"
   | "sort.edit" | "read.all" | "read.group" | "read.groupHelp" | "proposal.accept" | "proposal.decline" | "proposal.list" | "option.detailAt" | "option.detailAtHelp"
@@ -335,6 +335,7 @@ const MENU: ReadonlyArray<Binding> = [
   { action: "tab.board", keys: ["SPC g b"], label: "tab.board", group: "tab", modes: BOTH },
   { action: "tab.gantt", keys: ["SPC g g"], label: "tab.gantt", group: "tab", modes: BOTH },
   { action: "tab.wiki", keys: ["SPC g w"], label: "tab.wiki", group: "tab", modes: BOTH },
+  { action: "tab.files", keys: ["SPC g f"], label: "tab.files", group: "tab", modes: BOTH },
   { action: "view.deferred", keys: ["SPC v l"], label: "view.deferred", group: "view", kind: "toggle", modes: BROWSE_ONLY, state: (c) => shown(c.hidden?.deferred) },
   { action: "view.backlog", keys: ["SPC v b"], label: "view.backlog", group: "view", kind: "toggle", modes: BROWSE_ONLY, state: (c) => shown(c.hidden?.backlog) },
   { action: "view.archived", keys: ["SPC v o"], label: "view.archived", group: "view", kind: "toggle", modes: BROWSE_ONLY, state: (c) => shown(c.hidden?.archived) },

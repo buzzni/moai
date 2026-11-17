@@ -505,6 +505,29 @@ body.m-resizing:is([data-resize="bottom"], [data-resize="top"]) { cursor: row-re
 .m-card-line .m-id, .m-card-line .m-count { font: 12px var(--mono); color: var(--muted); }
 .m-card-title { margin-top: 5px; overflow-wrap: anywhere; }
 
+.m-pane-files { min-height: 0; height: 100%; }
+.m-pane-files .m-split { height: 100%; }
+.m-files-tree, .m-files-content { height: 100%; overflow: auto; }
+.m-files-row { display: block; width: 100%; border: 0; text-align: left; color: inherit; background: transparent; white-space: nowrap; }
+.m-files-row[aria-selected="true"] { background: var(--selected); }
+.m-files-row:disabled { opacity: .5; }
+.m-files-depth-1 { padding-left: 1.5em; } .m-files-depth-2 { padding-left: 2.5em; } .m-files-depth-3 { padding-left: 3.5em; }
+.m-files-depth-4, .m-files-depth-5, .m-files-depth-6, .m-files-depth-7, .m-files-depth-8, .m-files-depth-9, .m-files-depth-10, .m-files-depth-11, .m-files-depth-12 { padding-left: 4.5em; }
+.m-file-line { display: flex; min-width: max-content; font-family: monospace; white-space: pre; }
+.m-file-number { position: sticky; left: 0; min-width: 4em; text-align: right; padding-right: 1em; background: var(--bg); opacity: .65; }
+.m-syntax-comment { color: var(--ok); } .m-syntax-string { color: var(--warn); } .m-syntax-keyword { color: var(--accent); } .m-syntax-number { color: var(--text-muted); }
+.m-pane-files { container: files / inline-size; }
+@container files (max-width: 639px) {
+  .m-split-detail, .m-split-resizer { display: none; }
+  .m-files-show-content .m-split-list { display: none; }
+  .m-files-show-content .m-split-detail { display: block; }
+}
+.m-files-kind-directory { color: var(--accent); }
+.m-files-kind-link { color: var(--warn); }
+.m-files-kind-source { color: var(--text); }
+.m-files-kind-document { color: var(--ok); }
+.m-files-kind-config { color: var(--text-muted); }
+
 /*
  * The gantt tab (view/gantt.ts): a toolbar, one scroll box holding two columns — the grid (left, sticky, so it never
  * moves sideways) and the dates — and a legend. Ported from the mockup the person confirmed

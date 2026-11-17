@@ -1364,6 +1364,11 @@ mod image_tests {
         std::fs::write(root.join(".env"), "secret").unwrap();
         std::fs::write(root.join("docs/a.rs"), "let x = \"한글\";\n").unwrap();
         let call = |path: &str| answer(&request(path, "localhost"), &site);
+        let limited = call("/api/files?limit=1");
+        let listed: serde_json::Value = serde_json::from_slice(&limited.body).unwrap();
+        assert_eq!(listed["out"]["entries"].as_array().unwrap().len(), 1);
+        assert_eq!(listed["out"]["truncated"], true);
+        assert_eq!(call("/api/files?limit=0").status, 400);
         let read = call("/api/file?path=.env");
         assert_eq!(read.status, 200);
         assert_eq!(serde_json::from_slice::<serde_json::Value>(&read.body).unwrap()["out"]["text"], "secret");

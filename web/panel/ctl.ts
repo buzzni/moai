@@ -71,7 +71,7 @@ export function createCtl(options: CtlOptions) {
     if ((held.pending.length > 0 || keys.context().mode === 'sorter') && !ownedHeld) return true
     return held.menu !== null && !ownedMenu
   }
-  const screen = (name: unknown): name is Tab => name === 'board' || name === 'list' || name === 'gantt' || name === 'wiki'
+  const screen = (name: unknown): name is Tab => name === 'board' || name === 'list' || name === 'gantt' || name === 'wiki' || name === 'files'
   const after = (): Reply => {
     const state = current()
     return yes({ screen: state.tab, cursor: state.cursor, mode: keys.context().mode, menu: heldPrefix(keys.router.state()), changed: true })
