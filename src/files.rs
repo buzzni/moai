@@ -82,7 +82,7 @@ pub enum Kind {
     Link { dir: bool, inside: bool },
     Other,
 }
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, PartialEq, Eq)]
 pub struct Entry {
     pub name: String,
     pub kind: Kind,

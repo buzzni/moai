@@ -39,7 +39,7 @@ pub struct Prepared {
     error: Option<git::Told>,
     lang: crate::i18n::Lang,
 }
-fn told(root: &Path, lang: crate::i18n::Lang, e: vcs::Error) -> git::Told {
+pub(crate) fn told(root: &Path, lang: crate::i18n::Lang, e: vcs::Error) -> git::Told {
     match e {
         vcs::Error::Git(e) => e.told(root, lang),
         vcs::Error::Io(e) => git::Error::Stream(e).told(root, lang),

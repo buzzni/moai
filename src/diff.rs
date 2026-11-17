@@ -10,7 +10,7 @@ pub enum FileKind {
     Copied,
     ModeChanged,
 }
-#[derive(Debug, Clone, serde::Serialize)]
+#[derive(Debug, Clone, PartialEq, Eq, serde::Serialize)]
 pub struct FileDiff {
     pub old_path: Option<String>,
     pub new_path: Option<String>,
@@ -23,7 +23,7 @@ impl Default for FileDiff {
         Self { old_path: None, new_path: None, kind: FileKind::Modified, binary: false, hunks: Vec::new() }
     }
 }
-#[derive(Debug, Clone, serde::Serialize)]
+#[derive(Debug, Clone, PartialEq, Eq, serde::Serialize)]
 pub struct Hunk {
     pub old_start: usize,
     pub old_len: usize,
@@ -40,7 +40,7 @@ pub enum LineKind {
     Delete,
     Raw,
 }
-#[derive(Debug, Clone, serde::Serialize)]
+#[derive(Debug, Clone, PartialEq, Eq, serde::Serialize)]
 pub struct Line {
     pub kind: LineKind,
     pub old_no: Option<usize>,

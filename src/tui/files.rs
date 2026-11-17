@@ -130,14 +130,6 @@ fn racy(stamp: &files::Stamp) -> bool {
     stamp.modified.is_some_and(|m| SystemTime::now().duration_since(m).map_or(true, |d| d < RACY))
 }
 
-/// Two folder listings alike — the entries and the links' text.
-fn same_entries(a: &[Entry], b: &[Entry]) -> bool {
-    a.len() == b.len()
-        && a.iter()
-            .zip(b)
-            .all(|(x, y)| x.name == y.name && x.kind == y.kind && x.size == y.size && x.openable == y.openable)
-}
-
 /// The folders one sweep stamps: all of them while they are few, else [`SWEEP_LIMIT`] going on after `after` and round
 /// the end — so every open folder is stamped within a few looks. Gives them and where the next look goes on.
 fn turn(open: &[&str], after: Option<&str>, limit: usize) -> (Vec<String>, Option<String>) {
@@ -1901,6 +1893,15 @@ impl Window {
         self.diff_on && !self.folded
     }
 
+    /// The frame measured whether the diff folds under the detail (`draw::files_window`). A fold lets the diff's read
+    /// go; room again aims it at the cursor.
+    pub(super) fn set_folded(&mut self, folded: bool) {
+        if self.folded != folded {
+            self.folded = folded;
+            self.aim_diff();
+        }
+    }
+
     // ---- the checkout, the changed files, the detail and the diff (moai-ffk9.211) ----
 
     /// Read the checkout list afresh — at the window's opening and as the picker opens.
@@ -1922,9 +1923,13 @@ impl Window {
     }
 
     /// The diff pane follows the cursor: a file's changes, a folder's (every changed file below it), nothing on `..`
-    /// or a note row. Off, it holds nothing and reads nothing.
+    /// or a note row. Off, or folded under the detail, it holds nothing and reads nothing — the list's pane's rule
+    /// (`App::aim_diff`): no `git` runs for a pane no one sees. It reads again once it stands ([`Window::set_folded`]).
     fn aim_diff(&mut self) {
-        if !self.diff_on {
+        if !self.diff_stands() {
+            if self.diff.source().is_some() {
+                self.diff.close();
+            }
             return;
         }
         let path = match self.current() {
@@ -2122,6 +2127,10 @@ impl Window {
         self.changed.list = Listing::Reading;
         self.changed.before = None;
         self.places_id = 0;
+        // A sweep out on the old worker answers on its channel, which is never read again — left standing, its id
+        // would hold `refresh_step` off for the rest of the window's life (a removed worktree's `Gone` comes mid-sweep).
+        self.refresh.sweep = None;
+        self.refresh.from = None;
         self.diff.close();
         self.detail.rewind();
         self.open(".");
@@ -2273,7 +2282,7 @@ impl Window {
                         let refresh = std::mem::take(&mut self.changed.refreshing);
                         let held = matches!(self.changed.list, Listing::Read(_));
                         let same = match (&got, &self.changed.list) {
-                            (Ok(new), Listing::Read(old)) => diff::same_changes(new, old),
+                            (Ok(new), Listing::Read(old)) => new == old.as_ref(),
                             // A refresh that failed keeps the list held; the next look tries again, without a word.
                             (Err(_), _) => refresh && held,
                             _ => false,
@@ -2435,7 +2444,7 @@ impl Window {
                         (
                             Some(Read::Listed { entries: a, links: x, .. }),
                             Read::Listed { entries: b, links: y, .. },
-                        ) => same_entries(a, b) && x == y,
+                        ) => a == b && x == y,
                         _ => false,
                     };
                     // The same entries: only the stamp is new — nothing to draw.
@@ -4785,6 +4794,59 @@ mod tests {
         assert!(window(&a).checkout.main, "the window stayed on the removed worktree");
         assert!(names(&a).contains(&"README.md".to_string()), "{:?}", names(&a));
         assert!(a.notice.as_deref().is_some_and(|n| n.contains("gone-wt")), "{:?}", a.notice);
+    }
+
+    /// **A sweep out when the checkout changes does not stop the refresh** — its answer goes to the old worker's
+    /// channel, which is never read again (a removed worktree's `Gone` comes in the middle of one). The new checkout's
+    /// folders are still swept on the next look.
+    #[test]
+    fn a_sweep_out_as_the_checkout_changes_leaves_the_refresh_running() {
+        let (s, mut a) = files_app("refresh-switch");
+        let b = other_checkout(&s, "switch-wt", &["d/x.txt"]);
+        let root = b.path.clone();
+        placing(&mut a, &s, vec![b.clone()], Vec::new());
+        let t = clocked(&mut a);
+        a.hit("SPC g f");
+        settle(&mut a);
+        let Mode::Files(w) = &mut a.mode else { panic!("no window") };
+        // The look the old worker is still on — its `Swept` never comes back.
+        w.refresh.sweep = Some(u64::MAX);
+        w.switch(b);
+        settle(&mut a);
+        assert_eq!(names(&a), ["d"]);
+        std::fs::write(root.join("new.txt"), "").unwrap();
+        look(&mut a, &t, Duration::from_secs(2));
+        assert!(names(&a).contains(&"new.txt".to_string()), "the refresh stopped after the switch: {:?}", names(&a));
+    }
+
+    /// **A diff folded under the detail reads nothing** — the cursor moving over files starts no `git`, and room again
+    /// reads the file under the cursor.
+    #[test]
+    fn a_folded_diff_reads_nothing_until_it_stands() {
+        let (_s, mut a) = files_app("diff-folded");
+        let asked = Arc::new(Mutex::new(Vec::new()));
+        let log = asked.clone();
+        a.files_disk = std::mem::take(&mut a.files_disk).diffing(move |src, _, _, _| {
+            if let diff::Source::Checkout { path, .. } = src {
+                log.lock().unwrap().push(path.clone().unwrap_or_default());
+            }
+            diff::Loaded::default()
+        });
+        // The clock stands: no refresh comes due to read on its own.
+        let _t = clocked(&mut a);
+        standing_on(&mut a, "README.md");
+        a.hit("SPC v d Esc");
+        // 30 columns: the right side cannot hold the detail and the diff.
+        draw::tests::render(&mut a, 30, 40);
+        a.hit("SPC v D Esc");
+        settle(&mut a);
+        on(&mut a, "src");
+        settle(&mut a);
+        assert!(window(&a).folded && window(&a).diff_on);
+        assert!(asked.lock().unwrap().is_empty(), "a folded diff ran git: {:?}", asked.lock().unwrap());
+        draw::tests::render(&mut a, 160, 40);
+        settle(&mut a);
+        assert_eq!(*asked.lock().unwrap(), ["src/"], "the diff did not read once it stood");
     }
 
     /// The diff pane follows the cursor through the window: a file's path, a folder's with a `/`.

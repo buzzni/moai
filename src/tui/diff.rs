@@ -341,23 +341,11 @@ pub type ReadFn = dyn Fn(&Source, Option<Scope>, Option<Duration>, Lang) -> Load
 /// Colours one file — `highlight::diff`, or a test's stand-in.
 pub type PaintFn = dyn Fn(&FileDiff) -> Option<Vec<Vec<Vec<highlight::Span>>>> + Send + Sync;
 
-/// The read layer's error as the pane says it — `changes::told`'s mapping, for the reads this file makes itself.
+/// The read layer's error as the pane says it — `changes::told` itself, for the reads this file makes, so the pane and
+/// `moai diff` never word one failure two ways.
 pub(super) fn told(root: &std::path::Path, lang: Lang, e: vcs::Error) -> Failed {
-    let words = |kind: &'static str, key: &'static str| Failed { kind, said: say(lang, key).to_owned() };
-    match e {
-        vcs::Error::Git(e) => {
-            let t = e.told(root, lang);
-            Failed { kind: t.kind, said: t.said }
-        }
-        vcs::Error::Io(e) => {
-            let t = crate::git::Error::Stream(e).told(root, lang);
-            Failed { kind: t.kind, said: t.said }
-        }
-        vcs::Error::Timeout => words("timeout", "diff.timeout"),
-        vcs::Error::Limit => words("failed", "diff.limit"),
-        vcs::Error::InvalidRevision => words("failed", "diff.invalid_revision"),
-        vcs::Error::InvalidPath => words("failed", "diff.invalid_path"),
-    }
+    let t = crate::changes::told(root, lang, e);
+    Failed { kind: t.kind, said: t.said }
 }
 
 /// The kind the parser would give a file the list names.
@@ -642,10 +630,7 @@ impl Work {
                     if !wanted() {
                         return;
                     }
-                    let old = was
-                        .parts
-                        .iter()
-                        .find(|o| same_change(&o.change, &part.change) && same_file(&o.file, &part.file));
+                    let old = was.parts.iter().find(|o| o.change == part.change && o.file == part.file);
                     let _ = part.paint.set(match old.and_then(|o| o.paint.get()) {
                         Some(p) => p.clone(),
                         None => paint(&part.file),
@@ -756,45 +741,8 @@ struct Answer {
     refresh: bool,
 }
 
-/// Two changes alike — path, kind and counts (the list's own words, moai-ffk9.15v).
-pub(super) fn same_change(a: &Change, b: &Change) -> bool {
-    a.path == b.path
-        && a.old_path == b.old_path
-        && a.status == b.status
-        && a.adds == b.adds
-        && a.dels == b.dels
-        && a.binary == b.binary
-}
-
-/// Two changed-file lists alike.
-pub(super) fn same_changes(a: &vcs::Changes, b: &vcs::Changes) -> bool {
-    a.total == b.total
-        && a.truncated == b.truncated
-        && a.files.len() == b.files.len()
-        && a.files.iter().zip(&b.files).all(|(x, y)| same_change(x, y))
-}
-
-fn same_file(a: &FileDiff, b: &FileDiff) -> bool {
-    a.old_path == b.old_path
-        && a.new_path == b.new_path
-        && a.kind == b.kind
-        && a.binary == b.binary
-        && a.hunks.len() == b.hunks.len()
-        && a.hunks.iter().zip(&b.hunks).all(|(x, y)| {
-            (x.old_start, x.old_len, x.new_start, x.new_len) == (y.old_start, y.old_len, y.new_start, y.new_len)
-                && x.section == y.section
-                && x.lines.len() == y.lines.len()
-                && x.lines.iter().zip(&y.lines).all(|(l, m)| {
-                    l.kind == m.kind
-                        && l.old_no == m.old_no
-                        && l.new_no == m.new_no
-                        && l.no_newline == m.no_newline
-                        && l.text == m.text
-                })
-        })
-}
-
-/// Two answers alike — what the pane would draw and the scopes it offers.
+/// Two answers alike — what the pane would draw and the scopes it offers. The changes, files and offers compare whole
+/// (derived `PartialEq`), so a field the read layer gains later counts without touching this.
 fn same(a: &Loaded, b: &Loaded) -> bool {
     a.scope == b.scope
         && a.total == b.total
@@ -802,13 +750,9 @@ fn same(a: &Loaded, b: &Loaded) -> bool {
         && a.patch_cut == b.patch_cut
         && a.failed == b.failed
         && a.unchanged == b.unchanged
-        && a.offers.len() == b.offers.len()
-        && a.offers
-            .iter()
-            .zip(&b.offers)
-            .all(|(x, y)| x.scope == y.scope && x.checkout == y.checkout && x.branch == y.branch && x.owner == y.owner)
+        && a.offers == b.offers
         && a.parts.len() == b.parts.len()
-        && a.parts.iter().zip(&b.parts).all(|(x, y)| same_change(&x.change, &y.change) && same_file(&x.file, &y.file))
+        && a.parts.iter().zip(&b.parts).all(|(x, y)| x.change == y.change && x.file == y.file)
 }
 
 /// The threads as the pane holds them — shared, not copied: a window holding the pane is cloned behind the suggestion

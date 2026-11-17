@@ -278,7 +278,10 @@ pub fn screen(f: &mut Frame, app: &mut App) {
     // The detail names the checkout whose journals the follow step watches ([`HistoryCache::moved`]) — none unless it
     // draws a row's history in this frame, so a hidden detail leaves nothing to stat.
     app.history.watched = None;
-    if let Some(at) = sides.detail {
+    // **Not under the file window** — it clears the body whole and lays out a detail of its own through the same
+    // one-row caches (`detail_body`: the body, the history lines, the wiki notes). Drawn here too, the list's row and the
+    // window's row would evict each other and both be laid out again on every frame.
+    if let Some(at) = sides.detail.filter(|_| !matches!(app.mode, Mode::Files(_))) {
         detail(f, app, at, &rows);
     }
     if let Some(at) = sides.diff {
@@ -2086,7 +2089,7 @@ fn files_window(
 ) -> super::mouse::FilesAt {
     f.render_widget(Clear, at);
     let FilesPrep { tree: tree_at, info: info_at, sides, folded, detail, titles, layout } = prep;
-    w.folded = folded;
+    w.set_folded(folded);
     if info_at.is_none() {
         w.focus = super::files::Side::Tree;
     }
@@ -2193,7 +2196,8 @@ fn files_pick(f: &mut Frame, w: &mut super::files::Window, at: Rect, titles: &[O
     p.list.reveal(p.cursor);
     let top = p.list.offset();
     let items: Vec<ListItem> = items.into_iter().skip(top).collect();
-    let mut state = ListState::default().with_selected(Some(p.cursor - top));
+    // `reveal` does nothing in a box with no inner rows, so the cursor may sit above the scroll there.
+    let mut state = ListState::default().with_selected(p.cursor.checked_sub(top));
     let look = Style::new().add_modifier(Modifier::REVERSED);
     f.render_stateful_widget(
         List::new(items).highlight_style(look).highlight_symbol(CURSOR).highlight_spacing(HighlightSpacing::Always),

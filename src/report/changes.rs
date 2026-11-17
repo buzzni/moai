@@ -22,7 +22,7 @@ pub enum Scope {
     Branch,
     Working,
 }
-#[derive(Debug, Clone, serde::Serialize)]
+#[derive(Debug, Clone, PartialEq, Eq, serde::Serialize)]
 pub struct Offer {
     pub scope: Scope,
     pub checkout: Option<String>,
