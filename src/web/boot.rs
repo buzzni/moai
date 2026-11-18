@@ -224,7 +224,7 @@ mod tests {
             let ext = crate::files::ext_of(name).to_ascii_lowercase();
             let keys = ["source", "doc", "data", "script", "binary"];
             keys.iter()
-                .find(|k| words(k, "ext").iter().any(|e| *e == ext))
+                .find(|k| words(k, "ext").contains(&ext))
                 .or_else(|| keys.iter().find(|k| words(k, "names").iter().any(|n| n == name)))
                 .copied()
                 .unwrap_or("plain")

@@ -1276,8 +1276,9 @@ mod tests {
         fs::create_dir(root.join("to")).unwrap();
         git(&["mv", "move/a", "to/a"]);
         // A link where a directory stood is read as no directory, never followed out of the checkout.
-        let outside = crate::scratch::Scratch::new("vcs-marks-outside");
         fs::remove_dir_all(root.join("lnk")).unwrap();
+        #[cfg(unix)]
+        let outside = crate::scratch::Scratch::new("vcs-marks-outside");
         #[cfg(unix)]
         std::os::unix::fs::symlink(&*outside, root.join("lnk")).unwrap();
         let c = Backend::Git.changes(root, &Scope::Whole, None).unwrap();
