@@ -4432,7 +4432,7 @@ pub(crate) fn diff_output(answer: &crate::changes::Answer, stat_only: bool) -> V
     let painted = body
         .split('\n')
         .map(|line| {
-            if line.starts_with("diff --git ") || line.starts_with("commit ") {
+            if line.starts_with("diff --git ") || line.starts_with("Index: ") || line.starts_with("commit ") {
                 in_hunk = false;
             }
             let style = if line.starts_with("@@") {
