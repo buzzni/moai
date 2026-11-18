@@ -64,11 +64,11 @@ pub(crate) enum Arg<'a> {
     /// svn 이 peg 로 읽지 않게.
     Url(&'a str, Option<u64>),
     /// `--old=<URL>@<rev>` — URL 대 작업 사본 diff 의 옛 쪽.
-    #[allow(dead_code)] // moai-0d0s.x27 (branch·whole) uses this.
     Old(&'a str, u64),
     /// `--new=<뿌리 밑 경로>` — URL 대 작업 사본 diff 의 새 쪽.
-    #[allow(dead_code)] // moai-0d0s.x27 (branch·whole) uses this.
     New(&'a str),
+    /// `--new=<URL>@<rev>` — URL 대 URL diff 의 새 쪽(moai-0d0s.x27 의 `branch`).
+    NewUrl(&'a str, u64),
     /// 작업 사본 `diff` 의 대상 경로 — `./<경로>`, **끝에 `@` 를 안 붙인다**(moai-0d0s.s6g 실측, svn 1.14.3).
     /// 작업 사본 대상의 `svn diff` 는 peg 를 안 읽는다: `./a@b` 는 그대로 `a@b` 고, `./m.txt@` 는 `@` 까지 이름으로
     /// 읽어 `E155010: The node '…/m.txt@' was not found` 로 죽는다. `-` 로 시작하는 이름은 `./` 가 막는다.
@@ -78,7 +78,7 @@ pub(crate) enum Arg<'a> {
 
 impl Arg<'_> {
     fn reaches_server(&self) -> bool {
-        matches!(self, Arg::Url(..) | Arg::Old(..))
+        matches!(self, Arg::Url(..) | Arg::Old(..) | Arg::NewUrl(..))
     }
 }
 
@@ -147,6 +147,9 @@ pub(crate) fn command(root: &Path, sub: Sub, args: &[Arg]) -> std::process::Comm
             }
             Arg::New(p) => {
                 cmd.arg(format!("--new={}", literal(p)));
+            }
+            Arg::NewUrl(u, rev) => {
+                cmd.arg(format!("--new={}", pegged(u, Some(*rev))));
             }
             Arg::Local(p) => {
                 cmd.arg(format!("./{p}"));
@@ -350,6 +353,224 @@ fn info_of(text: &str) -> Option<Info> {
         uuid: field(repo, "uuid")?,
         revision: entry.attr("revision")?.trim().parse().ok()?,
     })
+}
+
+/// Where a working copy stands by the trunk·branches·tags convention (moai-0d0s.x27), read from its `relative-url` by
+/// [`layout`] — the one place that decides it.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub(crate) enum Layout {
+    /// `…/trunk[/…]` — the main line, as a Git main checkout: no fork point.
+    Trunk,
+    /// `…/branches/<x>[/…]`.
+    Branch(Branch),
+    /// Anything else: `tags/<x>`, a path with none of the three words, `branches` with no name after it.
+    Unknown,
+}
+
+/// A working copy on `…/branches/<name>[/<sub>]`. Paths are repository paths split into **decoded** components, so
+/// they are encoded exactly once, by [`url`].
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub(crate) struct Branch {
+    pub name: String,
+    /// The branch root, keyword and any prefix included — `["proj", "branches", "x"]`.
+    pub root: Vec<String>,
+    /// Where the working copy stands below the branch root — `["sub"]`, or empty at the root.
+    pub sub: Vec<String>,
+}
+
+impl Layout {
+    /// The branch's name, when the working copy stands on one.
+    #[allow(dead_code)] // moai-0d0s.qg0 asks "is this working copy a branch?" through `layout_at` and this.
+    pub(crate) fn branch_name(&self) -> Option<&str> {
+        match self {
+            Layout::Branch(b) => Some(&b.name),
+            Layout::Trunk | Layout::Unknown => None,
+        }
+    }
+}
+
+/// **The convention, decided here and nowhere else** (moai-0d0s.x27). The first of `trunk`·`branches`·`tags` met from
+/// the repository root decides: `…/trunk[/…]` is the trunk, `…/branches/<x>[/…]` the branch `<x>` — its root is
+/// everything up to `<x>`, the words before the keyword kept as a prefix — and the rest is [`Layout::Unknown`]. A URL
+/// whose components do not decode to plain names (empty, `.`, `..`, bad `%`) is unknown too. Pure.
+pub(crate) fn layout(relative_url: &str) -> Layout {
+    let Some(parts) = components(relative_url) else { return Layout::Unknown };
+    let Some(at) = parts.iter().position(|p| matches!(p.as_str(), "trunk" | "branches" | "tags")) else {
+        return Layout::Unknown;
+    };
+    match (parts[at].as_str(), parts.get(at + 1)) {
+        ("trunk", _) => Layout::Trunk,
+        ("branches", Some(name)) => Layout::Branch(Branch {
+            name: name.clone(),
+            root: parts[..=at + 1].to_vec(),
+            sub: parts[at + 2..].to_vec(),
+        }),
+        _ => Layout::Unknown,
+    }
+}
+
+/// The working copy at `root`, read with `info` (local, no server) and placed by [`layout`]. **The one seam moai-0d0s.qg0
+/// asks "is this working copy a branch?" through** — the `branch`·`whole` scopes decide by the same [`layout`].
+#[allow(dead_code)] // moai-0d0s.qg0 (scope offers, the "branch is not served" line) uses this.
+pub(crate) fn layout_at(root: &Path, budget: Option<Duration>) -> Result<Layout, Error> {
+    Ok(layout(&info(root, "", budget)?.relative_url))
+}
+
+/// `^/a/b%20c` → `["a", "b c"]`; `None` when a component is not a plain name once decoded.
+fn components(relative_url: &str) -> Option<Vec<String>> {
+    let rest = relative_url.strip_prefix("^/")?;
+    if rest.is_empty() {
+        return Some(Vec::new());
+    }
+    rest.split('/').map(|c| decoded(c).filter(|d| plain(d))).collect()
+}
+
+/// A path component svn may hold and a URL may carry: not empty, not `.` or `..`, no `/` or NUL.
+fn plain(c: &str) -> bool {
+    !c.is_empty() && c != "." && c != ".." && !c.contains(['/', '\0'])
+}
+
+/// A URL component with its `%XX` undone; `None` when an escape is broken or the bytes are no UTF-8.
+fn decoded(s: &str) -> Option<String> {
+    let b = s.as_bytes();
+    let mut out = Vec::with_capacity(b.len());
+    let mut i = 0;
+    while i < b.len() {
+        if b[i] == b'%' {
+            let hex = std::str::from_utf8(b.get(i + 1..i + 3)?).ok()?;
+            out.push(u8::from_str_radix(hex, 16).ok()?);
+            i += 3;
+        } else {
+            out.push(b[i]);
+            i += 1;
+        }
+    }
+    String::from_utf8(out).ok()
+}
+
+/// **The one URL builder** (moai-0d0s.x27): the repository root as `svn info` printed it (already encoded — left as it
+/// is) and each decoded component percent-encoded once, everything but `A–Z a–z 0–9 - . _ ~`. The peg `@<rev>` is put
+/// on by the [`Arg`] that carries it, so a `@` in a name never reads as one. Takes only components that are
+/// [`plain`]; anything else is no URL.
+pub(crate) fn url(repos_root: &str, path: &[String]) -> Option<String> {
+    let mut out = repos_root.trim_end_matches('/').to_owned();
+    for c in path {
+        if !plain(c) {
+            return None;
+        }
+        out.push('/');
+        for b in c.bytes() {
+            if b.is_ascii_alphanumeric() || matches!(b, b'-' | b'.' | b'_' | b'~') {
+                out.push(b as char);
+            } else {
+                out.push_str(&format!("%{b:02X}"));
+            }
+        }
+    }
+    Some(out)
+}
+
+/// `/a/b` as `log` prints a repository path, split into plain components; `None` otherwise.
+pub(crate) fn repo_path(text: &str) -> Option<Vec<String>> {
+    let rest = text.strip_prefix('/')?;
+    rest.split('/').map(|c| plain(c).then(|| c.to_owned())).collect()
+}
+
+/// Where a branch was copied from — the repository path and revision of the copy's source.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub(crate) struct Fork {
+    pub path: Vec<String>,
+    pub rev: u64,
+}
+
+/// How a branch root came to be: the revision that made it, and the copy it was made from — `None` for a root made
+/// without one (`svn mkdir`).
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub(crate) struct Created {
+    pub rev: u64,
+    pub from: Option<Fork>,
+}
+
+/// The first entry of `log --xml -v --stop-on-copy -r 1:<BASE> --limit 1 <branch root>` read as [`Created`]: only a path
+/// that is the branch root **or above it**, added or replaced with `copyfrom-path`·`copyfrom-rev`, is the copy — the
+/// branch root continues below the copied path, so its source is the copy's source with the rest joined on (the
+/// longest such path wins). Other paths of the same revision are ignored. `None` when there is no entry, or a copy's
+/// attributes do not read as a plain path and a revision older than the entry's.
+pub(crate) fn created_of(text: &str, branch_root: &[String]) -> Option<Created> {
+    let doc = xml::parse(text);
+    let entry = doc.child("log")?.child("logentry")?;
+    let rev: u64 = entry.attr("revision")?.trim().parse().ok().filter(|&r| r > 0)?;
+    let mut best: Option<(usize, Fork)> = None;
+    for p in entry.child("paths").map(|ps| ps.children("path").collect::<Vec<_>>()).unwrap_or_default() {
+        let (Some(from), Some(from_rev)) = (p.attr("copyfrom-path"), p.attr("copyfrom-rev")) else { continue };
+        if !matches!(p.attr("action"), Some("A" | "R")) {
+            continue;
+        }
+        let Some(at) = repo_path(p.text().trim()) else { continue };
+        if !branch_root.starts_with(&at) || best.as_ref().is_some_and(|(n, _)| *n >= at.len()) {
+            continue;
+        }
+        let mut path = repo_path(from)?;
+        path.extend_from_slice(&branch_root[at.len()..]);
+        let from_rev: u64 = from_rev.trim().parse().ok().filter(|&r| r > 0 && r < rev)?;
+        best = Some((at.len(), Fork { path, rev: from_rev }));
+    }
+    Some(Created { rev, from: best.map(|(_, f)| f) })
+}
+
+/// Where the branch root of `here` was copied from — `None` when it was made without a copy. Asked of the server once
+/// per branch root and kept in the cache file's `forks` ([`cache`]); asked again only when the working copy's BASE is
+/// older than the revision that made the root (the root was made anew under the same name). The cache's other keys
+/// (`revs`·`through`) are written back as they were read.
+pub(crate) fn fork_of(
+    root: &Path,
+    here: &Info,
+    branch: &Branch,
+    budget: Option<Duration>,
+) -> Result<Option<Fork>, Error> {
+    let ask = || {
+        let url = url(&here.repos_root, &branch.root).ok_or_else(|| Error::Failed("no branch URL".into()))?;
+        let args = [
+            Arg::Flag("--xml"),
+            Arg::Flag("-v"),
+            Arg::Flag("--stop-on-copy"),
+            Arg::Value("-r", format!("1:{}", here.revision)),
+            Arg::Value("--limit", "1".into()),
+            Arg::Url(&url, Some(here.revision)),
+        ];
+        let (out, cut) = run(root, Sub::Log, &args, LOG_LIMIT, budget)?;
+        if cut {
+            return Err(Error::Failed("svn log output exceeds its limit".into()));
+        }
+        created_of(&String::from_utf8_lossy(&out), &branch.root)
+            .ok_or_else(|| Error::Failed("svn log gave no creation of the branch".into()))
+    };
+    Ok(created_within(cache::dir().as_deref(), here, &branch.root, ask)?.from)
+}
+
+/// [`fork_of`] with the cache directory and the server's answer given.
+fn created_within(
+    dir: Option<&Path>,
+    here: &Info,
+    branch_root: &[String],
+    ask: impl FnOnce() -> Result<Created, Error>,
+) -> Result<Created, Error> {
+    let key = cache::fork_key(branch_root);
+    let path = dir.and_then(|d| cache::path_in(d, &here.uuid));
+    if let Some(p) = &path
+        && let Some(known) = cache::read(p, &here.uuid).fork(&key)
+        && known.rev <= here.revision
+    {
+        return Ok(known);
+    }
+    let created = ask()?;
+    if let Some(p) = &path {
+        // Read again just before writing, so a table filled meanwhile is kept. A failed write is no failure.
+        let mut table = cache::read(p, &here.uuid);
+        table.set_fork(&key, &created);
+        let _ = cache::write(p, &table);
+    }
+    Ok(created)
 }
 
 /// A chunk of `log --xml` is cut here and asked again at half the range (moai-0d0s.4o8).
@@ -599,7 +820,6 @@ pub(crate) mod tests {
         }
 
         /// trunk 를 `branches/<name>` 으로 복사한다.
-        #[allow(dead_code)] // moai-0d0s.x27 uses this.
         pub(crate) fn branch(&self, name: &str) {
             let (from, to) = (format!("{}/trunk", self.url), format!("{}/branches/{name}", self.url));
             svn_in(&self.scratch, &["copy", "-q", "-m", &format!("branch {name}"), &from, &to]);
@@ -1061,5 +1281,171 @@ pub(crate) mod tests {
         let got = table_within(&wc, None, None, T0, 2, SERVER_TIMEOUT);
         assert_eq!(got.map(|_| ()).map_err(|e| e.kind()), Err("offline"));
         assert_eq!(admin_snapshot(&wc), before);
+    }
+
+    fn branch(name: &str, root: &[&str], sub: &[&str]) -> Layout {
+        let owned = |v: &[&str]| v.iter().map(|s| s.to_string()).collect();
+        Layout::Branch(Branch { name: name.into(), root: owned(root), sub: owned(sub) })
+    }
+
+    #[test]
+    fn the_convention_is_read_from_the_first_keyword() {
+        for trunk in ["^/trunk", "^/trunk/sub", "^/proj/trunk", "^/proj/trunk/a/b", "^/a/trunk/branches/y"] {
+            assert_eq!(layout(trunk), Layout::Trunk, "{trunk}");
+        }
+        assert_eq!(layout("^/branches/x"), branch("x", &["branches", "x"], &[]));
+        assert_eq!(layout("^/branches/x/sub"), branch("x", &["branches", "x"], &["sub"]));
+        let korean = branch("한글 x", &["proj", "branches", "한글 x"], &[]);
+        assert_eq!(layout("^/proj/branches/한글 x"), korean);
+        assert_eq!(layout("^/proj/branches/%ED%95%9C%EA%B8%80%20x"), korean, "svn prints it encoded");
+        assert_eq!(layout("^/branches/x@%23%3F%25/s%20p"), branch("x@#?%", &["branches", "x@#?%"], &["s p"]));
+        // The first keyword met from the root decides: a later one is a plain name.
+        assert_eq!(layout("^/branches/trunk/tags"), branch("trunk", &["branches", "trunk"], &["tags"]));
+        for unknown in [
+            "^/tags/1.0",
+            "^/tags/1.0/branches/x",
+            "^/",
+            "^/src",
+            "^/branches",
+            "^/proj/branches",
+            "^/Trunk",
+            "^/branches//x",
+            "^/branches/%2E%2E/x",
+            "^/branches/x%2Fy",
+            "^/branches/%E",
+            "^/branches/%FF",
+            "/branches/x",
+            "",
+        ] {
+            assert_eq!(layout(unknown), Layout::Unknown, "{unknown:?}");
+        }
+        assert_eq!(layout("^/branches/x").branch_name(), Some("x"));
+        assert_eq!(layout("^/trunk").branch_name(), None);
+    }
+
+    #[test]
+    fn a_url_encodes_each_component_once() {
+        let parts = |v: &[&str]| v.iter().map(|s| s.to_string()).collect::<Vec<_>>();
+        assert_eq!(
+            url("file:///r%20oot", &parts(&["branches", "한 x@#?%", "a.b-c_d~e"])).as_deref(),
+            Some("file:///r%20oot/branches/%ED%95%9C%20x%40%23%3F%25/a.b-c_d~e"),
+            "the root as svn printed it, each name once"
+        );
+        assert_eq!(url("file:///r/", &parts(&["trunk"])).as_deref(), Some("file:///r/trunk"));
+        assert_eq!(url("file:///r", &[]).as_deref(), Some("file:///r"));
+        for bad in [&["a", ".."][..], &["."], &[""], &["a/b"], &["a\0"]] {
+            assert_eq!(url("file:///r", &parts(bad)), None, "{bad:?}");
+        }
+        // The peg goes on after the whole URL, so a name's `@` is never one.
+        let encoded = url("file:///r", &parts(&["x@1"])).unwrap();
+        let args = argv(&command(Path::new("."), Sub::Diff, &[Arg::Old(&encoded, 3), Arg::NewUrl(&encoded, 4)]));
+        assert!(args.contains(&"--old=file:///r/x%401@3".to_owned()), "{args:?}");
+        assert!(args.contains(&"--new=file:///r/x%401@4".to_owned()), "{args:?}");
+        assert!(reaches_server(Sub::Diff, &[Arg::NewUrl(&encoded, 4)]));
+        assert_eq!(repo_path("/branches/한 x"), Some(parts(&["branches", "한 x"])));
+        for bad in ["", "trunk", "/", "/a//b", "/a/../b", "/./a", "/a/"] {
+            assert_eq!(repo_path(bad), None, "{bad:?}");
+        }
+    }
+
+    fn log_of(rev: u64, paths: &str) -> String {
+        format!(
+            "<?xml version=\"1.0\"?>\n<log>\n<logentry\n   revision=\"{rev}\">\n<author>a</author>\n<paths>\n{paths}</paths>\n<msg>m</msg>\n</logentry>\n</log>\n"
+        )
+    }
+
+    #[test]
+    fn the_creation_is_the_copy_of_the_branch_root_or_above() {
+        let root = |v: &[&str]| v.iter().map(|s| s.to_string()).collect::<Vec<_>>();
+        let x = root(&["branches", "x"]);
+        // Attributes in any order; another path copied in the same revision is not the branch's.
+        let text = log_of(
+            3,
+            "<path kind=\"file\" copyfrom-rev=\"1\" copyfrom-path=\"/elsewhere\" action=\"A\">/tags/t</path>\n<path\n   text-mods=\"false\"\n   kind=\"dir\"\n   copyfrom-path=\"/trunk\"\n   copyfrom-rev=\"2\"\n   action=\"A\"\n   prop-mods=\"false\">/branches/x</path>\n",
+        );
+        let fork = Some(Fork { path: root(&["trunk"]), rev: 2 });
+        assert_eq!(created_of(&text, &x), Some(Created { rev: 3, from: fork }));
+        // Copied from another branch: that copy is the fork point, as it is.
+        let text = log_of(5, "<path action=\"A\" copyfrom-path=\"/branches/y\" copyfrom-rev=\"4\">/branches/x</path>");
+        assert_eq!(created_of(&text, &x).unwrap().from, Some(Fork { path: root(&["branches", "y"]), rev: 4 }));
+        // A copy of a directory above: the rest of the branch root's path is joined on.
+        let text = log_of(9, "<path action=\"A\" copyfrom-path=\"/old\" copyfrom-rev=\"8\">/proj</path>");
+        let deep = root(&["proj", "branches", "x"]);
+        assert_eq!(
+            created_of(&text, &deep).unwrap().from,
+            Some(Fork { path: root(&["old", "branches", "x"]), rev: 8 })
+        );
+        // `svn mkdir`: made, not copied.
+        let text = log_of(8, "<path kind=\"dir\" action=\"A\">/branches/x</path>");
+        assert_eq!(created_of(&text, &x), Some(Created { rev: 8, from: None }));
+        // A copy below the root, a sibling's copy or a modification is not the root's creation.
+        let text = log_of(
+            6,
+            "<path action=\"A\" copyfrom-path=\"/trunk/a\" copyfrom-rev=\"2\">/branches/x/a</path><path action=\"A\" copyfrom-path=\"/trunk\" copyfrom-rev=\"2\">/branches/xy</path><path action=\"M\" copyfrom-path=\"/trunk\" copyfrom-rev=\"2\">/branches/x</path>",
+        );
+        assert_eq!(created_of(&text, &x), Some(Created { rev: 6, from: None }));
+        // What svn never prints is no answer: a copy source that is no plain path, a revision not older than the copy.
+        for bad in [
+            log_of(3, "<path action=\"A\" copyfrom-path=\"/a/../b\" copyfrom-rev=\"2\">/branches/x</path>"),
+            log_of(3, "<path action=\"A\" copyfrom-path=\"trunk\" copyfrom-rev=\"2\">/branches/x</path>"),
+            log_of(3, "<path action=\"A\" copyfrom-path=\"/trunk\" copyfrom-rev=\"3\">/branches/x</path>"),
+            log_of(3, "<path action=\"A\" copyfrom-path=\"/trunk\" copyfrom-rev=\"-c\">/branches/x</path>"),
+            log_of(0, ""),
+            "<log></log>".to_owned(),
+            String::new(),
+        ] {
+            assert_eq!(created_of(&bad, &x), None, "{bad}");
+        }
+    }
+
+    fn here_at(uuid: &str, revision: u64) -> Info {
+        Info {
+            url: "file:///r/branches/x".into(),
+            relative_url: "^/branches/x".into(),
+            repos_root: "file:///r".into(),
+            uuid: uuid.into(),
+            revision,
+        }
+    }
+
+    #[test]
+    fn a_branch_root_is_asked_once_and_again_only_when_made_after_base() {
+        const UUID: &str = "0f6c1c1e-2a5d-4b8e-9a43-1f0c3d2e5b6a";
+        let dir = Scratch::new("svn-fork-cache");
+        let x: Vec<String> = vec!["branches".into(), "x".into()];
+        let asked = std::cell::Cell::new(0);
+        let answer = |rev: u64, from: u64| {
+            let asked = &asked;
+            move || {
+                asked.set(asked.get() + 1);
+                Ok(Created { rev, from: Some(Fork { path: vec!["trunk".into()], rev: from }) })
+            }
+        };
+        let first = created_within(Some(&dir), &here_at(UUID, 7), &x, answer(3, 2)).unwrap();
+        assert_eq!((first.rev, asked.get()), (3, 1));
+        let again = created_within(Some(&dir), &here_at(UUID, 9), &x, answer(3, 2)).unwrap();
+        assert_eq!((again, asked.get()), (first.clone(), 1), "the second read is the cache's");
+        // The root made anew after this working copy's BASE: asked again, and kept.
+        let old = || {
+            asked.set(asked.get() + 1);
+            Ok(Created { rev: 1, from: None })
+        };
+        assert_eq!(created_within(Some(&dir), &here_at(UUID, 2), &x, old).unwrap(), Created { rev: 1, from: None });
+        assert_eq!(asked.get(), 2);
+        assert_eq!(created_within(Some(&dir), &here_at(UUID, 2), &x, answer(9, 8)).unwrap().rev, 1);
+        assert_eq!(asked.get(), 2, "the root made anew is kept too");
+        // A server that cannot answer leaves the cache as it was and says why.
+        let y: Vec<String> = vec!["branches".into(), "y".into()];
+        let gone = || Err(Error::Offline(None));
+        assert!(matches!(created_within(Some(&dir), &here_at(UUID, 9), &y, gone), Err(Error::Offline(None))));
+        let file = cache::path_in(&dir, UUID).unwrap();
+        assert!(cache::read(&file, UUID).fork("/branches/y").is_none());
+        // No cache directory: asked every time, nothing written.
+        let none = Scratch::new("svn-fork-nocache");
+        let before = asked.get();
+        created_within(None, &here_at(UUID, 9), &x, answer(3, 2)).unwrap();
+        created_within(None, &here_at(UUID, 9), &x, answer(3, 2)).unwrap();
+        assert_eq!(asked.get(), before + 2);
+        assert!(crate::scratch::names(&none).is_empty());
     }
 }

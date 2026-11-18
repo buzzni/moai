@@ -16,9 +16,16 @@
 //! - a working-copy `diff` reads its targets literally, with no peg ([`crate::svn::Arg::Local`]). Narrowed to a file
 //!   inside an `svn rm`'d or copied directory it prints nothing, so such a name is read through its directory and the
 //!   other files' sections are dropped ([`keep_sections`])
-//! - the scopes: `working` is BASE against the working copy; `whole` is the same until the fork point is known
-//!   (moai-0d0s.x27); `branch` is [`super::NoBase`]; `commits` reads each revision `r<n>` from the repository, the
-//!   root's URL at its BASE — the revisions themselves come from [`crate::svn::commits_within`] (moai-0d0s.4o8)
+//! - the scopes: `working` is BASE against the working copy; `commits` reads each revision `r<n>` from the
+//!   repository, the root's URL at its BASE — the revisions themselves come from [`crate::svn::commits_within`]
+//!   (moai-0d0s.4o8). `branch` and `whole` go by where the working copy stands ([`crate::svn::layout`], moai-0d0s.x27):
+//!   on a branch copied from somewhere, `branch` is that fork point against BASE, both sides URLs, and `whole` the fork
+//!   point against the working copy with untracked files from `status`; on the trunk `branch` is empty; with no fork
+//!   point known (no convention, a branch made by `svn mkdir`) `branch` is [`super::NoBase`] with its reason. Wherever
+//!   no fork point is known, `whole` is `working` — no server asked ([`reach`])
+//! - a URL-against-working-copy `diff` fails outright (`E000002 Can't open file`) while a file it would read is missing
+//!   (`!`, removed without `svn rm`), and a fork-side path that did not exist at the fork point fails with `E160005`.
+//!   Both reach the caller as svn's failure: a list without them would be a wrong one
 
 use super::{Change, Changes, Error, FILE_LIMIT, LIST_LIMIT, PATCH_LIMIT, Patch, Scope, Status};
 use crate::svn::{Arg, Sub};
@@ -40,13 +47,12 @@ impl Deadline {
     }
 }
 
-/// Whether the scope is served here: `working`·`whole` read the working copy, `commits` its revisions — each one
-/// `r<number>` or the whole call is [`Error::InvalidRevision`] before svn is spawned. `branch` has its own error.
+/// Whether the scope can be asked: `commits` names each revision `r<number>` or the whole call is
+/// [`Error::InvalidRevision`] before svn is spawned. Whether `branch` is served depends on the working copy ([`reach`]).
 fn served(scope: &Scope) -> Result<(), Error> {
     match scope {
-        Scope::Working | Scope::Whole => Ok(()),
+        Scope::Working | Scope::Whole | Scope::Branch => Ok(()),
         Scope::Commits(revs) => revisions(revs).map(drop),
-        Scope::Branch => Err(Error::NoBase(super::NoBase::Unread)),
     }
 }
 
@@ -98,46 +104,162 @@ fn commits_changes(root: &Path, revs: &[u64], budget: Option<Duration>) -> Resul
     for &rev in revs {
         deadline.check()?;
         let (out, cut) = revision_diff(root, &here, rev, &deadline)?;
-        let mut parsed = crate::diff::parse(&String::from_utf8_lossy(&out));
+        diff_rows(&out, cut, &mut rows);
         if cut {
-            parsed.pop();
             cut_any = true;
-        }
-        for f in parsed {
-            let Some(path) = f.new_path.as_deref().or(f.old_path.as_deref()).and_then(clean) else { continue };
-            let status = match (&f.old_path, &f.new_path) {
-                (None, _) => Status::Added,
-                (_, None) => Status::Deleted,
-                _ => Status::Modified,
-            };
-            let change = rows
-                .entry(path.clone())
-                .and_modify(|c| {
-                    let kept = status == Status::Modified && c.status == Status::Added;
-                    if !kept {
-                        c.status = status;
-                    }
-                })
-                .or_insert_with(|| row(path, status));
-            if f.binary {
-                change.binary = true;
-                change.adds = None;
-                change.dels = None;
-            } else if !change.binary {
-                let lines = f.hunks.iter().flat_map(|h| &h.lines);
-                let adds = lines.clone().filter(|l| l.kind == crate::diff::LineKind::Add).count();
-                let dels = lines.filter(|l| l.kind == crate::diff::LineKind::Delete).count();
-                change.adds = Some(change.adds.unwrap_or(0).saturating_add(adds));
-                change.dels = Some(change.dels.unwrap_or(0).saturating_add(dels));
-            }
-        }
-        if cut_any {
             break;
         }
     }
     let total = rows.len();
     let files: Vec<_> = rows.into_values().take(FILE_LIMIT).collect();
     Ok(Changes { files, total, truncated: cut_any || total > FILE_LIMIT })
+}
+
+/// The files one svn text diff holds, folded into `rows`: added and deleted by svn's `(nonexistent)` label, a file
+/// added by an earlier diff staying added through a later edit (as Git's list does), lines summed. A diff cut at
+/// [`PATCH_LIMIT`] drops its last section, which may be partial — the caller marks the list cut.
+fn diff_rows(out: &[u8], cut: bool, rows: &mut BTreeMap<String, Change>) {
+    let mut parsed = crate::diff::parse(&String::from_utf8_lossy(out));
+    if cut {
+        parsed.pop();
+    }
+    for f in parsed {
+        let Some(path) = f.new_path.as_deref().or(f.old_path.as_deref()).and_then(clean) else { continue };
+        let status = match (&f.old_path, &f.new_path) {
+            (None, _) => Status::Added,
+            (_, None) => Status::Deleted,
+            _ => Status::Modified,
+        };
+        let change = rows
+            .entry(path.clone())
+            .and_modify(|c| {
+                let kept = status == Status::Modified && c.status == Status::Added;
+                if !kept {
+                    c.status = status;
+                }
+            })
+            .or_insert_with(|| row(path, status));
+        if f.binary {
+            change.binary = true;
+            change.adds = None;
+            change.dels = None;
+        } else if !change.binary {
+            let lines = f.hunks.iter().flat_map(|h| &h.lines);
+            let adds = lines.clone().filter(|l| l.kind == crate::diff::LineKind::Add).count();
+            let dels = lines.filter(|l| l.kind == crate::diff::LineKind::Delete).count();
+            change.adds = Some(change.adds.unwrap_or(0).saturating_add(adds));
+            change.dels = Some(change.dels.unwrap_or(0).saturating_add(dels));
+        }
+    }
+}
+
+/// What `branch` and `whole` read, by where the working copy stands (moai-0d0s.x27).
+enum Reach {
+    /// The trunk's `branch`: nothing, as a Git main checkout's — no failure.
+    Nothing,
+    /// `whole` with no fork point known: the `working` scope, as before this member, no server asked.
+    Working,
+    /// The fork point — its URL (the working copy's place below the branch root joined on) and revision — and the
+    /// working copy as `info` read it.
+    Fork { old: String, rev: u64, here: crate::svn::Info },
+}
+
+/// Where `branch` (`branch` true) or `whole` reads from. Only a working copy on a branch copied from somewhere asks the
+/// server — once per branch root, then the cache answers ([`crate::svn::fork_of`]). The trunk and a working copy of no
+/// convention read `info` alone, so they answer with the repository out of reach.
+fn reach(root: &Path, branch: bool, deadline: &Deadline) -> Result<Reach, Error> {
+    use crate::svn::Layout;
+    let here = crate::svn::info(root, "", deadline.left())?;
+    let on = match crate::svn::layout(&here.relative_url) {
+        Layout::Trunk if branch => return Ok(Reach::Nothing),
+        Layout::Unknown if branch => return Err(Error::NoBase(super::NoBase::Convention)),
+        Layout::Trunk | Layout::Unknown => return Ok(Reach::Working),
+        Layout::Branch(b) => b,
+    };
+    match crate::svn::fork_of(root, &here, &on, deadline.left())? {
+        None if branch => Err(Error::NoBase(super::NoBase::NotCopied)),
+        None => Ok(Reach::Working),
+        Some(fork) => {
+            let path = [fork.path, on.sub].concat();
+            let old = crate::svn::url(&here.repos_root, &path).ok_or(Error::InvalidPath)?;
+            Ok(Reach::Fork { old, rev: fork.rev, here })
+        }
+    }
+}
+
+/// One diff from the fork point: to the working copy's URL at its BASE (`branch` — both sides in the repository, the
+/// working copy never read) or to the working copy itself (`whole`, which `diff` only reads). Read whole; callers cut
+/// the sections they need.
+fn fork_diff(
+    root: &Path,
+    old: &str,
+    rev: u64,
+    new: Option<&crate::svn::Info>,
+    deadline: &Deadline,
+) -> Result<(Vec<u8>, bool), Error> {
+    let mut args = vec![Arg::Flag("--show-copies-as-adds"), Arg::Old(old, rev)];
+    args.push(match new {
+        Some(here) => Arg::NewUrl(&here.url, here.revision),
+        None => Arg::New(""),
+    });
+    Ok(crate::svn::run(root, Sub::Diff, &args, PATCH_LIMIT, deadline.left())?)
+}
+
+/// `branch` or `whole`: the rows of the fork point's one diff, and for `whole` the untracked files `status` lists —
+/// tracked files come from the diff alone, so a file changed on the branch and again locally is one row.
+fn ranged_changes(root: &Path, branch: bool, budget: Option<Duration>) -> Result<Changes, Error> {
+    let deadline = Deadline::of(budget);
+    let (old, rev, here) = match reach(root, branch, &deadline)? {
+        Reach::Nothing => return Ok(Changes::default()),
+        Reach::Working => return changes_inner(root, deadline.left()),
+        Reach::Fork { old, rev, here } => (old, rev, here),
+    };
+    let (out, cut) = fork_diff(root, &old, rev, branch.then_some(&here), &deadline)?;
+    let mut rows = BTreeMap::new();
+    diff_rows(&out, cut, &mut rows);
+    if !branch {
+        for path in list(root, &deadline)?.untracked() {
+            rows.entry(path.clone()).or_insert_with(|| row(path, Status::Untracked));
+        }
+    }
+    let total = rows.len();
+    let mut files: Vec<_> = rows.into_values().take(FILE_LIMIT).collect();
+    for change in files.iter_mut().filter(|c| c.status == Status::Untracked) {
+        deadline.check()?;
+        super::untracked_counts(root, change);
+    }
+    Ok(Changes { files, total, truncated: cut || total > FILE_LIMIT })
+}
+
+/// `branch` or `whole`'s patch: the fork point's one diff as svn printed it, narrowed here to the files and folders
+/// asked ([`keep_sections`]), and for `whole` the untracked files after it in Git's form.
+fn ranged_patch(
+    root: &Path,
+    branch: bool,
+    paths: Option<&[String]>,
+    budget: Option<Duration>,
+    known: Option<Vec<String>>,
+) -> Result<Patch, Error> {
+    let deadline = Deadline::of(budget);
+    let (old, rev, here) = match reach(root, branch, &deadline)? {
+        Reach::Nothing => return Ok(Patch::default()),
+        Reach::Working => return patch_inner(root, paths, deadline.left(), known),
+        Reach::Fork { old, rev, here } => (old, rev, here),
+    };
+    let (data, cut) = fork_diff(root, &old, rev, branch.then_some(&here), &deadline)?;
+    let mut out = match paths {
+        Some(specs) => keep_sections(&data, specs),
+        None => data,
+    };
+    let mut truncated = cut;
+    if !branch && !truncated {
+        let names = match known {
+            Some(names) => names,
+            None => list(root, &deadline)?.untracked(),
+        };
+        untracked_into(root, names, paths, &mut out, &mut truncated, &deadline)?;
+    }
+    Ok(capped(out, truncated))
 }
 
 /// The revisions' diffs one after another, each whole from the server and narrowed here to the files and folders
@@ -459,6 +581,10 @@ pub(super) fn changes(root: &Path, scope: &Scope, budget: Option<Duration>) -> R
         let revs = revisions(revs)?;
         return super::timed(budget, move || commits_changes(&root, &revs, budget));
     }
+    if let Scope::Branch | Scope::Whole = scope {
+        let branch = matches!(scope, Scope::Branch);
+        return super::timed(budget, move || ranged_changes(&root, branch, budget));
+    }
     super::timed(budget, move || changes_inner(&root, budget))
 }
 fn changes_inner(root: &Path, budget: Option<Duration>) -> Result<Changes, Error> {
@@ -533,6 +659,10 @@ pub(super) fn patch(
         let revs = revisions(revs)?;
         return super::timed(budget, move || commits_patch(&root, &revs, paths.as_deref(), budget));
     }
+    if let Scope::Branch | Scope::Whole = scope {
+        let branch = matches!(scope, Scope::Branch);
+        return super::timed(budget, move || ranged_patch(&root, branch, paths.as_deref(), budget, known));
+    }
     super::timed(budget, move || patch_inner(&root, paths.as_deref(), budget, known))
 }
 fn patch_inner(
@@ -572,17 +702,31 @@ fn patch_inner(
             (None, Some(read)) => read.untracked(),
             (None, None) => list(root, &deadline)?.untracked(),
         };
-        for name in names.into_iter().filter(|n| paths.is_none_or(|ps| ps.iter().any(|p| super::covers(p, n)))) {
-            deadline.check()?;
-            let (data, cut) = super::untracked_patch(root, &name, PATCH_LIMIT.saturating_sub(out.len()))?;
-            out.extend(data);
-            truncated |= cut;
-            if truncated {
-                break;
-            }
-        }
+        untracked_into(root, names, paths, &mut out, &mut truncated, &deadline)?;
     }
     Ok(capped(out, truncated))
+}
+
+/// The untracked files among `names` that `paths` (all when `None`) cover, appended in Git's form until the patch is
+/// full.
+fn untracked_into(
+    root: &Path,
+    names: Vec<String>,
+    paths: Option<&[String]>,
+    out: &mut Vec<u8>,
+    truncated: &mut bool,
+    deadline: &Deadline,
+) -> Result<(), Error> {
+    for name in names.into_iter().filter(|n| paths.is_none_or(|ps| ps.iter().any(|p| super::covers(p, n)))) {
+        deadline.check()?;
+        let (data, cut) = super::untracked_patch(root, &name, PATCH_LIMIT.saturating_sub(out.len()))?;
+        out.extend(data);
+        *truncated |= cut;
+        if *truncated {
+            break;
+        }
+    }
+    Ok(())
 }
 
 /// The ignored directories, each with its trailing `/`, and `.svn/` always: `status --no-ignore` entries marked
@@ -840,12 +984,12 @@ mod tests {
             assert!(!h.is_empty(), "{} has no hunk in\n{}", f.path, p.text);
             assert_eq!((Some(counted(&h).0), Some(counted(&h).1)), (f.adds, f.dels), "{}", f.path);
         }
-        // `whole` is `working` until the fork point is read; `branch` is not served.
+        // On the trunk `whole` is `working` and `branch` is empty, as a Git main checkout's (moai-0d0s.x27).
         let whole = Backend::Svn.changes(&wc, &Scope::Whole, None).unwrap();
         assert_eq!(whole, c);
         assert_eq!(Backend::Svn.patch(&wc, &Scope::Whole, None, None).unwrap().text, p.text);
-        assert!(matches!(Backend::Svn.changes(&wc, &Scope::Branch, None), Err(Error::NoBase(_))));
-        assert!(matches!(Backend::Svn.patch(&wc, &Scope::Branch, None, None), Err(Error::NoBase(_))));
+        assert_eq!(Backend::Svn.changes(&wc, &Scope::Branch, None).unwrap(), Changes::default());
+        assert!(Backend::Svn.patch(&wc, &Scope::Branch, None, None).unwrap().text.is_empty());
         // `commits` is served since moai-0d0s.4o8: no revisions, no changes.
         assert_eq!(Backend::Svn.changes(&wc, &Scope::Commits(vec![]), None).unwrap(), Changes::default());
         // Directory marks read no facts: every directory stands `M`.
@@ -1172,5 +1316,267 @@ mod tests {
         assert!(matches!(got, Err(Error::Svn(crate::svn::Error::Offline(_)))), "{got:?}");
         let got = Backend::Svn.changes(&wc, &commits(&["r3"]), None);
         assert!(matches!(got, Err(Error::Svn(crate::svn::Error::Offline(_)))), "{got:?}");
+    }
+
+    /// The encoded URL of `path` under the repository — the crate's own builder.
+    fn url_of(repo: &Repo, path: &[&str]) -> String {
+        crate::svn::url(&repo.url, &path.iter().map(|p| p.to_string()).collect::<Vec<_>>()).expect("url")
+    }
+    /// Checks `path` out to `<scratch>/<dir>`, any name in it.
+    fn checkout_at(repo: &Repo, path: &[&str], dir: &str) -> std::path::PathBuf {
+        let wc = repo.scratch.join(dir);
+        svn_in(&repo.scratch, &["checkout", "-q", &format!("{}@", url_of(repo, path)), &wc.to_string_lossy()]);
+        wc
+    }
+
+    /// trunk r2 → `branches/<name>` r3 → two branch commits r4·r5 → one trunk commit r6, then on the branch's working
+    /// copy an uncommitted edit, an added file and an untracked one. `sub` is a directory in every revision.
+    fn branched(test: &str, name: &str, sub: &str) -> (Repo, std::path::PathBuf, std::path::PathBuf) {
+        let repo = Repo::new(test);
+        let trunk = repo.checkout("trunk", "trunk-wc");
+        let s = |f: &str| format!("{sub}/{f}");
+        commit_files(
+            &trunk,
+            &[("a.txt", "a\nb\nc\n"), ("gone.txt", "g\n"), ("same.txt", "same\n"), (&s("s.txt"), "s\n")],
+            "r2 base",
+        );
+        let from = format!("{}/trunk", repo.url);
+        // svn reads a copy's target `%40` as a peg too: the empty peg after it keeps the name whole.
+        let to = format!("{}@", url_of(&repo, &["branches", name]));
+        svn_in(&repo.scratch, &["copy", "-q", "-m", "r3 branch", &from, &to]);
+        let wc = checkout_at(&repo, &["branches", name], "branch-wc");
+        commit_files(&wc, &[("a.txt", "a\nB\nc\n"), ("new1.txt", "n1\n")], "r4 on the branch");
+        svn_in(&wc, &["rm", "-q", "./gone.txt@"]);
+        commit_files(&wc, &[(&s("s.txt"), "s\nbranch s\n")], "r5 on the branch");
+        commit_files(&trunk, &[("a.txt", "a\nb\nc\ntrunk\n"), ("trunk.txt", "t\n"), (&s("t.txt"), "t\n")], "r6 trunk");
+        svn_in(&wc, &["update", "-q"]);
+        fs::write(wc.join("a.txt"), "a\nB\nc\nlocal\n").unwrap();
+        fs::write(wc.join("added.txt"), "added\n").unwrap();
+        svn_in(&wc, &["add", "-q", "./added.txt@"]);
+        fs::write(wc.join("u.txt"), "untracked\n").unwrap();
+        fs::write(wc.join(s("local.txt")), "in sub\n").unwrap();
+        fs::write(wc.join(s("s.txt")), "s\nbranch s\nlocal s\n").unwrap();
+        (repo, trunk, wc)
+    }
+
+    /// Every row's hunks are in the patch by the rule the surfaces use, with the row's counts; a file is one section.
+    fn rows_match_patch(c: &Changes, p: &Patch) {
+        for f in c.files.iter().filter(|f| !f.binary) {
+            let h = hunks_of(&p.text, &f.path);
+            assert!(!h.is_empty(), "{} has no hunk in\n{}", f.path, p.text);
+            assert_eq!((Some(counted(&h).0), Some(counted(&h).1)), (f.adds, f.dels), "{}", f.path);
+            let sections = crate::diff::parse(&p.text).iter().filter(|d| hunks_of_one(d, &f.path)).count();
+            assert_eq!(sections, 1, "{} is in {sections} sections:\n{}", f.path, p.text);
+        }
+    }
+    fn hunks_of_one(f: &crate::diff::FileDiff, name: &str) -> bool {
+        f.new_path.as_deref() == Some(name) || (f.new_path.is_none() && f.old_path.as_deref() == Some(name))
+    }
+
+    #[test]
+    fn branch_reads_the_fork_point_to_base_and_whole_adds_the_working_copy() {
+        if !svn_ready() {
+            return;
+        }
+        let (repo, trunk, wc) = branched("vcs-svn-branch", "x", "sub");
+        let before = admin_snapshot(&wc);
+        use Status::*;
+
+        let b = Backend::Svn.changes(&wc, &Scope::Branch, None).unwrap();
+        assert_eq!(
+            paths(&b),
+            [("a.txt", Modified), ("gone.txt", Deleted), ("new1.txt", Added), ("sub/s.txt", Modified)],
+            "the two branch commits only: no trunk commit after the fork, nothing from before it, nothing uncommitted"
+        );
+        assert_eq!((find(&b, "a.txt").adds, find(&b, "a.txt").dels), (Some(1), Some(1)));
+        let bp = Backend::Svn.patch(&wc, &Scope::Branch, None, None).unwrap();
+        assert!(!bp.text.contains("local") && !bp.text.contains("+trunk") && !bp.truncated, "{}", bp.text);
+        rows_match_patch(&b, &bp);
+        let one = Backend::Svn.patch_of(&wc, &Scope::Branch, &["sub/".into()], None, Some(&b)).unwrap();
+        assert_eq!(crate::diff::parse(&one.text).len(), 1, "{}", one.text);
+
+        let w = Backend::Svn.changes(&wc, &Scope::Whole, None).unwrap();
+        assert_eq!(
+            paths(&w),
+            [
+                ("a.txt", Modified),
+                ("added.txt", Added),
+                ("gone.txt", Deleted),
+                ("new1.txt", Added),
+                ("sub/local.txt", Untracked),
+                ("sub/s.txt", Modified),
+                ("u.txt", Untracked),
+            ],
+            "committed, uncommitted and untracked in one list"
+        );
+        assert_eq!((find(&w, "a.txt").adds, find(&w, "a.txt").dels), (Some(2), Some(1)), "one row, both changes");
+        let wp = Backend::Svn.patch_with_changes(&wc, &Scope::Whole, None, None, &w).unwrap();
+        assert!(wp.text.contains("+local") && wp.text.contains("+untracked") && !wp.text.contains("+trunk"));
+        rows_match_patch(&w, &wp);
+        assert_eq!(Backend::Svn.patch(&wc, &Scope::Whole, None, None).unwrap().text, wp.text);
+        let narrowed = Backend::Svn.patch_of(&wc, &Scope::Whole, &["sub/".into()], None, Some(&w)).unwrap();
+        assert_eq!(hunks_of(&narrowed.text, "sub/s.txt"), hunks_of(&wp.text, "sub/s.txt"));
+        assert!(narrowed.text.contains("+in sub") && !narrowed.text.contains("+local\n"), "{}", narrowed.text);
+        assert_eq!(admin_snapshot(&wc), before, ".svn changed");
+
+        // The trunk: `branch` is empty — no failure — and `whole` is `working`.
+        fs::write(trunk.join("a.txt"), "on trunk\n").unwrap();
+        fs::write(trunk.join("loose"), "l\n").unwrap();
+        let trunk_before = admin_snapshot(&trunk);
+        assert_eq!(Backend::Svn.changes(&trunk, &Scope::Branch, None).unwrap(), Changes::default());
+        assert!(Backend::Svn.patch(&trunk, &Scope::Branch, None, None).unwrap().text.is_empty());
+        let working = Backend::Svn.changes(&trunk, &Scope::Working, None).unwrap();
+        let working_patch = Backend::Svn.patch(&trunk, &Scope::Working, None, None).unwrap().text;
+        assert_eq!(Backend::Svn.changes(&trunk, &Scope::Whole, None).unwrap(), working);
+        assert_eq!(Backend::Svn.patch(&trunk, &Scope::Whole, None, None).unwrap().text, working_patch);
+
+        for scope in [Scope::Branch, Scope::Whole] {
+            let late = Backend::Svn.changes(&wc, &scope, Some(Duration::ZERO));
+            assert!(matches!(late, Err(Error::Timeout)), "{scope:?}: {late:?}");
+            let late = Backend::Svn.patch(&wc, &scope, None, Some(Duration::ZERO));
+            assert!(matches!(late, Err(Error::Timeout)), "{scope:?}: {late:?}");
+        }
+
+        // The repository gone: the branch's two scopes are `offline`, no hang; `working` and the trunk still answer.
+        fs::remove_dir_all(repo.scratch.join("repo")).unwrap();
+        for scope in [Scope::Branch, Scope::Whole] {
+            let got = Backend::Svn.changes(&wc, &scope, Some(Duration::from_secs(20)));
+            assert!(matches!(got, Err(Error::Svn(crate::svn::Error::Offline(_)))), "{scope:?}: {got:?}");
+            let got = Backend::Svn.patch(&wc, &scope, None, None);
+            assert!(matches!(got, Err(Error::Svn(crate::svn::Error::Offline(_)))), "{scope:?}: {got:?}");
+        }
+        assert!(Backend::Svn.changes(&wc, &Scope::Working, None).unwrap().files.iter().any(|f| f.path == "a.txt"));
+        assert_eq!(Backend::Svn.changes(&trunk, &Scope::Whole, None).unwrap(), working);
+        assert_eq!(Backend::Svn.patch(&trunk, &Scope::Whole, None, None).unwrap().text, working_patch);
+        assert_eq!(Backend::Svn.changes(&trunk, &Scope::Branch, None).unwrap(), Changes::default());
+        assert_eq!((admin_snapshot(&wc), admin_snapshot(&trunk)), (before, trunk_before), ".svn changed");
+    }
+
+    #[test]
+    fn a_branch_subdirectory_with_hostile_names_reports_its_own_paths() {
+        if !svn_ready() {
+            return;
+        }
+        let (name, sub) = ("한글 x@#?%", "s p@1#");
+        let (_repo, _trunk, wc) = branched("vcs-svn-branch-names", name, sub);
+        let root = wc.join(sub);
+        let before = admin_snapshot(&wc);
+        assert_eq!(
+            crate::svn::layout_at(&root, None).unwrap().branch_name(),
+            Some(name),
+            "the one place that says which branch this is"
+        );
+        let b = Backend::Svn.changes(&root, &Scope::Branch, None).unwrap();
+        assert_eq!(paths(&b), [("s.txt", Status::Modified)], "inside the subdirectory only, its own paths");
+        let bp = Backend::Svn.patch(&root, &Scope::Branch, None, None).unwrap();
+        assert!(bp.text.contains("+branch s") && !bp.text.contains("local s"), "{}", bp.text);
+        let w = Backend::Svn.changes(&root, &Scope::Whole, None).unwrap();
+        assert_eq!(paths(&w), [("local.txt", Status::Untracked), ("s.txt", Status::Modified)]);
+        assert_eq!((find(&w, "s.txt").adds, find(&w, "s.txt").dels), (Some(2), Some(0)));
+        let wp = Backend::Svn.patch_with_changes(&root, &Scope::Whole, None, None, &w).unwrap();
+        rows_match_patch(&w, &wp);
+        assert!(!wp.text.contains("a.txt") && !wp.text.contains("t.txt"), "{}", wp.text);
+        // The branch root itself, by the same names.
+        let all = Backend::Svn.changes(&wc, &Scope::Branch, None).unwrap();
+        assert_eq!(all.files.len(), 4, "{all:?}");
+        assert!(find(&all, &format!("{sub}/s.txt")).adds == Some(1));
+        assert_eq!(admin_snapshot(&wc), before, ".svn changed");
+    }
+
+    #[test]
+    fn without_a_fork_point_branch_says_why_and_whole_is_working() {
+        if !svn_ready() {
+            return;
+        }
+        let repo = Repo::new("vcs-svn-nobase");
+        svn_in(&repo.scratch, &["mkdir", "-q", "-m", "src", &format!("{}/src", repo.url)]);
+        svn_in(&repo.scratch, &["mkdir", "-q", "-m", "plain", &format!("{}/branches/plain", repo.url)]);
+        let trunk = repo.checkout("trunk", "trunk-wc");
+        commit_files(&trunk, &[("a.txt", "a\n")], "trunk");
+        svn_in(
+            &repo.scratch,
+            &["copy", "-q", "-m", "tag", &format!("{}/trunk", repo.url), &url_of(&repo, &["tags", "1.0"])],
+        );
+        let mut places = Vec::new();
+        for (path, dir) in
+            [(&["src"][..], "src-wc"), (&["branches", "plain"], "plain-wc"), (&["tags", "1.0"], "tag-wc")]
+        {
+            let wc = checkout_at(&repo, path, dir);
+            commit_files(&wc, &[("f.txt", "f\n")], &format!("{dir} file"));
+            svn_in(&wc, &["update", "-q"]);
+            fs::write(wc.join("f.txt"), "changed\n").unwrap();
+            fs::write(wc.join("loose"), "u\n").unwrap();
+            places.push(wc);
+        }
+        let [src, plain, tag] = [&places[0], &places[1], &places[2]];
+        let reason = |wc: &Path| match Backend::Svn.changes(wc, &Scope::Branch, None) {
+            Err(Error::NoBase(why)) => Some(why),
+            other => panic!("{}: {other:?}", wc.display()),
+        };
+        assert_eq!(reason(src), Some(super::super::NoBase::Convention), "no convention: neither empty nor a list");
+        assert_eq!(reason(tag), Some(super::super::NoBase::Convention), "a tag is no branch");
+        assert_eq!(reason(plain), Some(super::super::NoBase::NotCopied), "a branch made by mkdir, told apart");
+        assert!(matches!(
+            Backend::Svn.patch(plain, &Scope::Branch, None, None),
+            Err(Error::NoBase(super::super::NoBase::NotCopied))
+        ));
+        let same = |wc: &Path| {
+            let working = Backend::Svn.changes(wc, &Scope::Working, None).unwrap();
+            assert_eq!(working.files.len(), 2, "{working:?}");
+            assert_eq!(Backend::Svn.changes(wc, &Scope::Whole, None).unwrap(), working, "{}", wc.display());
+            let text = Backend::Svn.patch(wc, &Scope::Working, None, None).unwrap().text;
+            assert_eq!(Backend::Svn.patch(wc, &Scope::Whole, None, None).unwrap().text, text, "{}", wc.display());
+        };
+        for wc in [src, plain, tag] {
+            same(wc);
+        }
+        // With the repository gone, the working copies of no convention still answer `whole`; a branch made by
+        // `svn mkdir` does too once its creation is known.
+        fs::remove_dir_all(repo.scratch.join("repo")).unwrap();
+        for wc in [src, plain, tag] {
+            same(wc);
+        }
+        assert_eq!(reason(src), Some(super::super::NoBase::Convention));
+    }
+
+    #[test]
+    fn the_fork_point_is_kept_beside_the_revision_table_and_read_from_there() {
+        if !svn_ready() {
+            return;
+        }
+        let (_repo, _trunk, wc) = branched("vcs-svn-forks", "x", "sub");
+        commit_files(&wc, &[("named.txt", "n\n")], "feat: named (moai-ab12)");
+        svn_in(&wc, &["update", "-q"]);
+        let dir = crate::scratch::Scratch::new("vcs-svn-forks-cache");
+        let here = crate::svn::info(&wc, "", None).unwrap();
+        let file = crate::svn::cache::path_in(&dir, &here.uuid).unwrap();
+        crate::svn::cache::tests::with_dir(Some(&dir), || {
+            let commits = crate::svn::commits_within(&wc, "moai-ab12", None).unwrap();
+            assert_eq!(commits.len(), 1);
+            let table = crate::svn::cache::read(&file, &here.uuid);
+            let b = Backend::Svn.changes(&wc, &Scope::Branch, None).unwrap();
+            assert_eq!(find(&b, "a.txt").status, Status::Modified);
+            let kept = crate::svn::cache::read(&file, &here.uuid);
+            assert_eq!((kept.through, &kept.revs, &kept.checked_at), (table.through, &table.revs, &table.checked_at));
+            let created = kept.fork("/branches/x").expect("the fork point is kept");
+            assert_eq!(created.rev, 3);
+            assert_eq!(created.from, Some(crate::svn::Fork { path: vec!["trunk".into()], rev: 2 }));
+            // Read from the file, not asked again: a fork point moved back to r1 (an empty trunk) shows in the list.
+            let mut moved = kept.clone();
+            moved.set_fork(
+                "/branches/x",
+                &crate::svn::Created { rev: 3, from: Some(crate::svn::Fork { path: vec!["trunk".into()], rev: 1 }) },
+            );
+            crate::svn::cache::write(&file, &moved).unwrap();
+            let b = Backend::Svn.changes(&wc, &Scope::Branch, None).unwrap();
+            assert_eq!(find(&b, "a.txt").status, Status::Added, "{b:?}");
+            // An entry out of shape is dropped and asked again — never put on svn's command line.
+            let mut bad = moved.clone();
+            bad.forks.insert("/branches/x".into(), serde_json::json!({"created": 3, "from": "/../x", "rev": 2}));
+            crate::svn::cache::write(&file, &bad).unwrap();
+            let b = Backend::Svn.changes(&wc, &Scope::Branch, None).unwrap();
+            assert_eq!(find(&b, "a.txt").status, Status::Modified);
+            assert_eq!(crate::svn::cache::read(&file, &here.uuid).fork("/branches/x"), Some(created));
+        });
     }
 }

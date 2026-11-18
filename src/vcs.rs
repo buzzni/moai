@@ -67,6 +67,7 @@ pub enum Error {
     /// budget running out is [`Error::Timeout`], never this.
     Svn(crate::svn::Error),
     /// `branch` is not served for this working copy (no known fork point). The reason says why.
+    #[allow(dead_code)] // moai-0d0s.qg0 reads the reason to word the "branch is not served" line.
     NoBase(NoBase),
     Timeout,
     Limit,
@@ -77,9 +78,12 @@ pub enum Error {
 /// Why an svn working copy has no `branch` scope.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum NoBase {
-    /// The trunk·branches convention is not read yet: the reading and its reasons land with moai-0d0s.x27, which
-    /// replaces this variant.
-    Unread,
+    /// The working copy's URL follows no trunk·branches convention (moai-0d0s.x27): `tags/<x>`, none of `trunk`·
+    /// `branches`·`tags`, or `branches` with no name after it ([`crate::svn::layout`]).
+    Convention,
+    /// The working copy stands on `branches/<x>`, but that branch root was made without a copy (`svn mkdir`): there is
+    /// nothing it forked from.
+    NotCopied,
 }
 impl From<git::Error> for Error {
     fn from(e: git::Error) -> Self {

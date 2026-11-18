@@ -16,7 +16,10 @@
 //!   subject and those words. Words are read by the rule Git's commit table uses ([`crate::git::words`],
 //!   [`crate::git::trailed`]) and kept when [`crate::git::ids_in`] takes them, whatever project they belong to —
 //!   one repository may hold several projects and ids may be made later
-//! - `forks`: branch fork points, filled by moai-0d0s.x27. This member keeps it as it was read
+//! - `forks`: how each branch root came to be (moai-0d0s.x27), keyed by its repository path (`/branches/x`):
+//!   `{"created": <the revision that made it>, "from": "/trunk", "rev": <the copy's source revision>}`, or only
+//!   `created` for a root made without a copy. Asked of the server once; an entry out of shape is dropped and asked
+//!   again ([`Table::fork`]), and one made after the working copy's BASE is asked again too
 //! - any other key is kept as read, so an older binary does not drop what a newer one wrote
 //!
 //! Writes go to a fresh temporary file beside the target and are renamed over it — a reader sees the old file or the
@@ -52,7 +55,7 @@ pub(crate) struct Table {
     pub checked_at: Option<String>,
     #[serde(default)]
     pub revs: Vec<Rev>,
-    /// moai-0d0s.x27's fork points. Kept as read.
+    /// moai-0d0s.x27's branch roots, read through [`Table::fork`]. Kept as read otherwise.
     #[serde(default)]
     pub forks: serde_json::Map<String, serde_json::Value>,
     /// Keys this binary does not know, kept as read.
@@ -111,6 +114,36 @@ impl Table {
             .is_some_and(|at| at <= now && now - at < POLL_SECS)
     }
 
+    /// The kept creation of the branch root `key` ([`fork_key`]), or `None` when there is none or it is out of shape —
+    /// then it is asked again and replaced (moai-0d0s.x27). Only what can be trusted reaches a URL or svn's command
+    /// line: `created` and `rev` are JSON numbers (never strings), `0 < rev < created`, and `from` is a repository path
+    /// of plain components (no empty one, no `.` or `..`). A `from` without its `rev`, or the reverse, is out of shape.
+    pub(crate) fn fork(&self, key: &str) -> Option<crate::svn::Created> {
+        let entry = self.forks.get(key)?.as_object()?;
+        let rev = entry.get("created")?.as_u64().filter(|&r| r > 0)?;
+        let from = match (entry.get("from"), entry.get("rev")) {
+            (None, None) => None,
+            (Some(path), Some(at)) => {
+                let path = crate::svn::repo_path(path.as_str()?)?;
+                let at = at.as_u64().filter(|&r| r > 0 && r < rev)?;
+                Some(crate::svn::Fork { path, rev: at })
+            }
+            _ => return None,
+        };
+        Some(crate::svn::Created { rev, from })
+    }
+
+    /// Keeps the creation of the branch root `key`, replacing what was there. Every other key is left as it was.
+    pub(crate) fn set_fork(&mut self, key: &str, created: &crate::svn::Created) {
+        let mut entry = serde_json::Map::new();
+        entry.insert("created".into(), created.rev.into());
+        if let Some(f) = &created.from {
+            entry.insert("from".into(), fork_key(&f.path).into());
+            entry.insert("rev".into(), f.rev.into());
+        }
+        self.forks.insert(key.to_owned(), entry.into());
+    }
+
     /// The revisions that name `id`, newest first — the order [`crate::git::commits_within`] gives. A revision is
     /// written `r<number>`; tracker revisions are marked, not dropped.
     pub(crate) fn commits(&self, id: &str) -> Vec<crate::git::Commit> {
@@ -139,6 +172,15 @@ pub(crate) fn rev_of(rev: u64, message: &str) -> Option<Rev> {
         }
     }
     (!tokens.is_empty()).then(|| Rev { rev, subject: subject.to_owned(), tokens })
+}
+
+/// A branch root's key in `forks`: its repository path as `log` prints it, `/branches/x` — decoded, not a URL.
+pub(crate) fn fork_key(path: &[String]) -> String {
+    path.iter().fold(String::new(), |mut s, c| {
+        s.push('/');
+        s.push_str(c);
+        s
+    })
 }
 
 /// A UUID as `svn info` prints it: 36 characters, hex digits and hyphens at 8·13·18·23. Nothing else names a file.
@@ -651,5 +693,58 @@ pub(crate) mod tests {
         .unwrap_err();
         assert_eq!(*saved.borrow(), 4);
         assert!(matches!(settle(&t, stop, false), Err(Error::Offline(None))));
+    }
+
+    #[test]
+    fn a_fork_entry_out_of_shape_is_none_and_setting_one_keeps_every_other_key() {
+        use crate::svn::{Created, Fork};
+        let mut t = sample();
+        t.forks.clear();
+        let trunk = Created { rev: 3, from: Some(Fork { path: vec!["trunk".into()], rev: 2 }) };
+        t.set_fork("/branches/x", &trunk);
+        t.set_fork("/branches/plain", &Created { rev: 8, from: None });
+        let deep = Created { rev: 9, from: Some(Fork { path: vec!["한 x".into(), "a@b".into()], rev: 4 }) };
+        t.set_fork("/proj/branches/y", &deep);
+        assert_eq!(t.fork("/branches/x"), Some(trunk));
+        assert_eq!(t.fork("/branches/plain"), Some(Created { rev: 8, from: None }));
+        assert_eq!(t.fork("/proj/branches/y"), Some(deep));
+        assert_eq!(t.fork("/branches/none"), None);
+        // Setting forks drops nothing member 4 keeps, and the file reads back byte for byte.
+        let base = sample();
+        assert_eq!(
+            (t.through, &t.revs, &t.checked_at, &t.extra),
+            (base.through, &base.revs, &base.checked_at, &base.extra)
+        );
+        let bytes = t.to_bytes();
+        let back = Table::of_bytes(&bytes, UUID).expect("reads");
+        assert_eq!(back.to_bytes(), bytes);
+        let text = String::from_utf8(bytes).unwrap();
+        assert!(text.contains(r#""/branches/x":{"created":3,"from":"/trunk","rev":2}"#), "{text}");
+        // Out of shape: dropped (asked again), never on a command line — the rest of the table stands.
+        for bad in [
+            serde_json::json!({"created": 3, "from": "/a/../etc", "rev": 2}),
+            serde_json::json!({"created": 3, "from": "/a//b", "rev": 2}),
+            serde_json::json!({"created": 3, "from": "/./a", "rev": 2}),
+            serde_json::json!({"created": 3, "from": "trunk", "rev": 2}),
+            serde_json::json!({"created": 3, "from": "", "rev": 2}),
+            serde_json::json!({"created": 3, "from": "/trunk", "rev": "2"}),
+            serde_json::json!({"created": 3, "from": "/trunk", "rev": "2 --diff-cmd=x"}),
+            serde_json::json!({"created": 3, "from": "/trunk", "rev": -2}),
+            serde_json::json!({"created": 3, "from": "/trunk", "rev": 0}),
+            serde_json::json!({"created": 3, "from": "/trunk", "rev": 3}),
+            serde_json::json!({"created": 3, "from": "/trunk", "rev": 2.5}),
+            serde_json::json!({"created": "3", "from": "/trunk", "rev": 2}),
+            serde_json::json!({"created": 0}),
+            serde_json::json!({"created": 3, "from": "/trunk"}),
+            serde_json::json!({"created": 3, "rev": 2}),
+            serde_json::json!({"from": "/trunk", "rev": 2}),
+            serde_json::json!("/trunk@2"),
+        ] {
+            let mut t = sample();
+            t.forks.insert("/branches/x".into(), bad.clone());
+            assert_eq!(t.fork("/branches/x"), None, "{bad}");
+            let back = Table::of_bytes(&t.to_bytes(), UUID).expect("the table still reads");
+            assert_eq!(back.revs, t.revs);
+        }
     }
 }
