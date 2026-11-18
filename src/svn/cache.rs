@@ -477,16 +477,22 @@ pub(crate) mod tests {
 
     #[test]
     fn the_cache_path_needs_an_absolute_place_and_a_real_uuid() {
-        let env = |pairs: &'static [(&'static str, &'static str)]| {
+        let env = |pairs: &[(&'static str, String)]| {
+            let pairs = pairs.to_vec();
             move |k: &str| pairs.iter().find(|(n, _)| *n == k).map(|(_, v)| OsString::from(v))
         };
-        assert_eq!(dir_from(env(&[("XDG_CACHE_HOME", "/x/c"), ("HOME", "/h")])), Some(PathBuf::from("/x/c/moai/svn")));
+        // An absolute place is spelt per platform: `/x/c` has no drive on Windows, so it is not absolute there.
+        let abs = |p: &str| if cfg!(windows) { format!("C:{p}") } else { p.to_owned() };
         assert_eq!(
-            dir_from(env(&[("XDG_CACHE_HOME", "rel"), ("HOME", "/h")])),
-            Some(PathBuf::from("/h/.cache/moai/svn"))
+            dir_from(env(&[("XDG_CACHE_HOME", abs("/x/c")), ("HOME", abs("/h"))])),
+            Some(PathBuf::from(abs("/x/c")).join("moai").join("svn"))
         );
-        assert_eq!(dir_from(env(&[("XDG_CACHE_HOME", "")])), None, "no home: no cache, no failure");
-        assert_eq!(dir_from(env(&[("HOME", "relative")])), None);
+        assert_eq!(
+            dir_from(env(&[("XDG_CACHE_HOME", "rel".into()), ("HOME", abs("/h"))])),
+            Some(PathBuf::from(abs("/h")).join(".cache").join("moai").join("svn"))
+        );
+        assert_eq!(dir_from(env(&[("XDG_CACHE_HOME", String::new())])), None, "no home: no cache, no failure");
+        assert_eq!(dir_from(env(&[("HOME", "relative".into())])), None);
         assert_eq!(dir_from(env(&[])), None);
         let dir = Path::new("/c");
         assert_eq!(path_in(dir, UUID), Some(dir.join(format!("{UUID}.json"))));
