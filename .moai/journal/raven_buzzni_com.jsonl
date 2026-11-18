@@ -13699,3 +13699,5 @@
 {"ts":"2026-11-18T11:26:46Z","id":"moai-0d0s","kind":"note","by":"레이븐","by_email":"raven@buzzni.com","text":"Report-checked: b4863355 merge into milestone/moai-t7db"}
 {"ts":"2026-11-18T11:28:06Z","id":"moai-ovds","kind":"create","by":"레이븐","by_email":"raven@buzzni.com","title":"v1.5.0 릴리스 — 소식 글과 그림, develop→main PR"}
 {"ts":"2026-11-18T11:28:06Z","id":"moai-ovds","kind":"status","by":"레이븐","by_email":"raven@buzzni.com","from":"todo","to":"in_progress"}
+{"ts":"2026-11-18T11:49:12Z","id":"moai-ovds","kind":"note","by":"레이븐","by_email":"raven@buzzni.com","text":"model: anthropic/sonnet-5.5 (medium — 릴리스 그림 네 장과 make.sh)"}
+{"ts":"2026-11-18T11:49:13Z","id":"moai-ovds","kind":"note","by":"레이븐","by_email":"raven@buzzni.com","text":"Next: PR 머지(squash 안 함)·관리자 tag on merge 승인 뒤 마일스톤 워크트리·가지·/tmp/cargo-target/milestone-moai-t7db 를 걷고 닫는다"}
