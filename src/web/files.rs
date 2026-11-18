@@ -97,10 +97,10 @@ fn answer_inner(path: &str, cwd: &Path, lang: Lang, query: &[(String, String)], 
         "/api/files" => &["root", "dir", "limit"],
         "/api/file" => &["root", "path"],
         "/api/files-stamp" => &["root", "dir", "path"],
-        "/api/find" => &["root", "dir", "q"],
-        "/api/ignored" => &["root"],
-        "/api/changes" => &["root", "id", "scope", "worktree"],
-        "/api/diff" => &["root", "id", "scope", "path", "worktree"],
+        "/api/find" => &["root", "dir", "q", "vcs"],
+        "/api/ignored" => &["root", "vcs"],
+        "/api/changes" => &["root", "id", "scope", "worktree", "vcs"],
+        "/api/diff" => &["root", "id", "scope", "path", "worktree", "vcs"],
         _ => return missing(),
     };
     let mut args: HashMap<&str, Vec<&str>> = HashMap::new();
@@ -123,12 +123,29 @@ fn answer_inner(path: &str, cwd: &Path, lang: Lang, query: &[(String, String)], 
     if path == "/api/checkouts" {
         let load = repo.read().ok();
         let workplaces = worktree::workplaces(repo.here(), true);
-        return ok(
-            json!({"checkouts": all.iter().map(|c| json!({"key":c.key,"branch":c.branch,"main":c.main,"milestone":c.milestone,"issue":load.as_ref().and_then(|l| crate::report::changes::issue_of(&l.issues,c,&workplaces)).map(|i| &i.id),"current":crate::path::canonical(&c.path).ok()==crate::path::canonical(repo.here()).ok()})).collect::<Vec<_>>() }),
-        );
+        let mut out = json!({"checkouts": all.iter().map(|c| json!({"key":c.key,"branch":c.branch,"main":c.main,"milestone":c.milestone,"issue":load.as_ref().and_then(|l| crate::report::changes::issue_of(&l.issues,c,&workplaces)).map(|i| &i.id),"current":crate::path::canonical(&c.path).ok()==crate::path::canonical(repo.here()).ok()})).collect::<Vec<_>>() });
+        // Git and svn both standing here: the one key the file tab draws its git·svn control from (moai-0d0s.qg0). A
+        // root under one backend answers as it did, byte for byte.
+        let (found, default, _) = crate::changes::chosen(repo.here(), &repo.config, None, None);
+        if found.git
+            && found.svn
+            && let (Some(map), Some(default)) = (out.as_object_mut(), default)
+        {
+            map.insert("vcs".into(), json!({"found":["git","svn"],"default":default.word()}));
+        }
+        return ok(out);
     }
+    // `vcs=git|svn` — the file tab's pick for a checkout's reads (moai-0d0s.qg0). Someone's text: a known word, of a
+    // backend found under that checkout, or the request is refused.
+    let vcs = match get("vcs") {
+        None => None,
+        Some(word) => match crate::vcs::Backend::of_word(word) {
+            Some(b) => Some(b),
+            None => return bad(),
+        },
+    };
     if matches!(path, "/api/changes" | "/api/diff") && get("id").is_some() {
-        if get("root").is_some() {
+        if get("root").is_some() || vcs.is_some() {
             return bad();
         }
         let overlay = match get("worktree") {
@@ -139,11 +156,15 @@ fn answer_inner(path: &str, cwd: &Path, lang: Lang, query: &[(String, String)], 
         return issue_changes(path, &repo, lang, get("id").unwrap(), get("scope"), get("path"), overlay, &left);
     }
     let Some(chosen) = checkout(&repo, &all, get("root")) else { return missing() };
+    if vcs.is_some_and(|b| !crate::vcs::detected(&chosen.path).has(b)) {
+        return bad();
+    }
+    let backend = crate::changes::chosen(&chosen.path, &repo.config, None, vcs).1;
     if matches!(path, "/api/changes" | "/api/diff") {
         if get("scope").is_some() || get("worktree").is_some() {
             return bad();
         }
-        return checkout_changes(path, chosen, get("path"), &left);
+        return checkout_changes(path, chosen, backend, get("path"), lang, &left);
     }
     let Some(jail) = files::Jail::of(chosen) else { return missing() };
     if path == "/api/files-stamp" {
@@ -203,7 +224,7 @@ fn answer_inner(path: &str, cwd: &Path, lang: Lang, query: &[(String, String)], 
             }
         }
         "/api/ignored" | "/api/find" => {
-            let ignored = match crate::vcs::detect(&chosen.path) {
+            let ignored = match backend {
                 Some(v) => match v.ignored_dirs(&chosen.path, Some(left())) {
                     Ok(dirs) => Some(dirs),
                     Err(crate::vcs::Error::Timeout) if path == "/api/ignored" => {
@@ -353,7 +374,7 @@ fn issue_changes(
     if load.get(id).is_none() {
         return missing();
     }
-    let prepared = crate::changes::offers(repo, &load.issues, id, Some(left()), lang);
+    let prepared = crate::changes::offers(repo, &load.issues, id, Some(left()), lang, None);
     match prepared.read(scope, file, path == "/api/changes", Some(left())) {
         Ok(answer) => {
             if answer.vcs_error.as_ref().is_some_and(|e| e.kind == "timeout") {
@@ -376,8 +397,21 @@ fn issue_changes(
         Err(_) => missing(),
     }
 }
-fn checkout_changes(path: &str, checkout: &Checkout, file: Option<&str>, left: &dyn Fn() -> Duration) -> Response {
-    let Some(backend) = crate::vcs::detect(&checkout.path) else {
+/// A checkout's whole-branch list or patch. An svn failure answers with `changes::told`'s kind and line, as the issue's
+/// reads do (moai-0d0s.qg0); Git's answers stay as they were.
+fn checkout_changes(
+    path: &str,
+    checkout: &Checkout,
+    backend: Option<crate::vcs::Backend>,
+    file: Option<&str>,
+    lang: Lang,
+    left: &dyn Fn() -> Duration,
+) -> Response {
+    let svn = |e: crate::vcs::Error| {
+        let t = crate::changes::told(&checkout.path, lang, backend, e);
+        ok(json!({"scope":"whole","files":[],"total":0,"truncated":false,"vcs_error":{"kind":t.kind,"said":t.said}}))
+    };
+    let Some(backend) = backend else {
         return ok(
             json!({"scope":"whole","files":[],"total":0,"truncated":false,"vcs_error":{"kind":"unavailable","said":"version control unavailable"}}),
         );
@@ -385,6 +419,7 @@ fn checkout_changes(path: &str, checkout: &Checkout, file: Option<&str>, left: &
     let changes = match backend.changes(&checkout.path, &crate::vcs::Scope::Whole, Some(left())) {
         Ok(c) => c,
         Err(crate::vcs::Error::Timeout) => return refuse(504, "request timed out", code::TIMEOUT),
+        Err(e) if backend == crate::vcs::Backend::Svn => return svn(e),
         Err(_) => {
             return ok(
                 json!({"scope":"whole","files":[],"total":0,"truncated":false,"vcs_error":{"kind":"failed","said":"version control unavailable"}}),
@@ -415,6 +450,7 @@ fn checkout_changes(path: &str, checkout: &Checkout, file: Option<&str>, left: &
     let patch = match read {
         Ok(p) => p,
         Err(crate::vcs::Error::Timeout) => return refuse(504, "request timed out", code::TIMEOUT),
+        Err(e) if backend == crate::vcs::Backend::Svn => return svn(e),
         Err(_) => return missing(),
     };
     let parsed = crate::diff::parse(&patch.text);
@@ -443,6 +479,8 @@ fn checkout_changes(path: &str, checkout: &Checkout, file: Option<&str>, left: &
         truncated: changes.truncated || patch.truncated,
         vcs_error: None,
         patch: String::new(),
+        notice: None,
+        warning: None,
     };
     let mut out = add_highlights(&answer, highlight_until(left));
     out["scope"] = json!("whole");
@@ -548,6 +586,8 @@ mod tests {
             truncated: false,
             vcs_error: None,
             patch: String::new(),
+            notice: None,
+            warning: None,
         };
         let line = |v: &Value, f: usize| v["files"][f]["hunks"][0]["lines"][0].clone();
         let far = Instant::now() + Duration::from_secs(60);

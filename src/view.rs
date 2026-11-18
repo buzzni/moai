@@ -4367,14 +4367,35 @@ pub(crate) fn scope_name(scope: &crate::report::changes::Scope) -> &'static str 
         crate::report::changes::Scope::Working => "working",
     }
 }
+/// `moai diff`'s stderr line. An svn working copy with no fork point puts its one line that `branch` is not served at
+/// the end (moai-0d0s.qg0); everywhere else the line is what it was.
 pub(crate) fn diff_notice(lang: crate::i18n::Lang, answer: &crate::changes::Answer) -> String {
+    let line = diff_notice_line(lang, answer);
+    match &answer.notice {
+        Some(notice) => format!("{line} · {notice}"),
+        None => line,
+    }
+}
+/// `moai diff --vcs` named a backend this root does not stand under — what is found, as `--scope`'s refusal names the
+/// scopes there are.
+pub(crate) fn diff_bad_vcs(lang: crate::i18n::Lang, asked: crate::vcs::Backend, found: crate::vcs::Detected) -> String {
+    let names: Vec<&str> = [crate::vcs::Backend::Git, crate::vcs::Backend::Svn]
+        .into_iter()
+        .filter(|b| found.has(*b))
+        .map(crate::vcs::Backend::word)
+        .collect();
+    let found = if names.is_empty() { crate::i18n::say(lang, "diff.vcs_none").to_owned() } else { names.join(", ") };
+    crate::i18n::fill(crate::i18n::say(lang, "diff.bad_vcs"), &[("vcs", asked.word()), ("found", &found)])
+}
+fn diff_notice_line(lang: crate::i18n::Lang, answer: &crate::changes::Answer) -> String {
     if let Some(error) = &answer.vcs_error {
         return error.said.clone();
     }
     let Some(scope) = answer.scope else { return crate::i18n::say(lang, "diff.empty").to_owned() };
     let mut parts = vec![scope_name(&scope).to_owned()];
     if let Some(offer) = answer.offers.iter().find(|o| o.scope == scope) {
-        if let Some(branch) = &offer.branch {
+        // An svn working copy of no convention is a checkout with no name (moai-0d0s.qg0); a Git checkout always has one.
+        if let Some(branch) = offer.branch.as_ref().filter(|b| !b.is_empty()) {
             parts.push(format!("{}: {branch}", crate::i18n::say(lang, "diff.branch")));
         }
         if let Some(owner) = &offer.owner {
@@ -4474,6 +4495,8 @@ mod tests {
             truncated: false,
             vcs_error: None,
             patch: patch.into(),
+            notice: None,
+            warning: None,
         };
         let lines = |patch: &str| {
             diff_output(&answer(patch), false).join("\n").split('\n').map(str::to_owned).collect::<Vec<_>>()

@@ -383,7 +383,7 @@ export interface Copy {
   table: KeyTableCopy
   wiki: WikiCopy
   diff: { owner: string; unified: string; side: string; narrow: string; binary: string; empty: string; truncated: string; retry: string; timeout: string; large: string; anyway: string; plain: string; terminal: string }
-  files: { collapsed: string; checkout: string; changed: string; diff: string; detail: string; on: string; off: string; noIssue: string; search: string; binary: string; truncated: string; readError: string; directoryError: string; searchError: string; matches: string; ignoredUnavailable: string; expansionLimit: string; unavailable: string }
+  files: { collapsed: string; checkout: string; changed: string; diff: string; detail: string; on: string; off: string; noIssue: string; search: string; binary: string; truncated: string; readError: string; directoryError: string; searchError: string; matches: string; ignoredUnavailable: string; expansionLimit: string; unavailable: string; vcs: string }
 }
 
 // ── the lookup ─────────────────────────────────────────────────────────────────────────────────────────

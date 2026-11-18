@@ -9,12 +9,12 @@ const { initialState } = await panelModule('store.ts')
 const wait = (ms = 0) => new Promise(resolve => setTimeout(resolve, ms))
 const words = { search: 'Find', binary: 'Binary', truncated: 'Truncated', readError: 'Read error', directoryError: 'Directory error', searchError: 'Search error', matches: 'matches', ignoredUnavailable: 'No ignore rules', expansionLimit: 'Limit', unavailable: 'Unavailable' }
 const entry = (name, kind = 'file') => ({ name, kind, openable: true, size: 1 })
-function page(request, checkouts = [{ key: '.', branch: '', main: true, current: true, issue: null, milestone: null }]) {
+function page(request, checkouts = [{ key: '.', branch: '', main: true, current: true, issue: null, milestone: null }], vcs = undefined) {
   const dom = new JSDOM('<body><div id="files"></div></body>', { pretendToBeVisual: true })
   const root = dom.window.document.querySelector('#files')
   const ctx = { document: dom.window.document, copy: { ...COPY.en, files: { ...COPY.en.files, ...words } }, language: 'en', client: { request }, intents: { dispatch() {}, closeDetail() {} }, layout: () => ({ width: 1000, mainWidth: 600, position: 'right', detailVisible: true }), focusPane() {} }
   const original = ctx.client.request
-  ctx.client.request = async (endpoint) => endpoint.path === '/api/checkouts' ? { kind: 'passed', output: { checkouts } } : original(endpoint)
+  ctx.client.request = async (endpoint) => endpoint.path === '/api/checkouts' ? { kind: 'passed', output: vcs === undefined ? { checkouts } : { checkouts, vcs } } : original(endpoint)
   const view = mountFiles(root, ctx)
   return { dom, root, view, state: initialState() }
 }
@@ -629,4 +629,38 @@ test('changed-only pressed twice before the list came enters once, and leaving g
   p.view.command('changed'); await wait(20)
   assert.match(p.root.querySelector('.m-files-tree').textContent, /plain\.txt/)
   p.view.destroy(); p.dom.window.close()
+})
+test('the git·svn control stands only when the checkouts answer names both, and its pick rides every checkout read', async () => {
+  const answer = async ({ path, query }) => {
+    if (path === '/api/files') return { kind: 'passed', output: { entries: [entry('changed')], truncated: false } }
+    if (path === '/api/changes') return { kind: 'passed', output: { files: [{ path: 'changed', status: 'modified', old_path: null, adds: 1, dels: 0, binary: false }] } }
+    if (path === '/api/ignored') return { kind: 'passed', output: { dirs: [] } }
+    return { kind: 'passed', output: { path: query.path, text: '', binary: false, truncated: false, spans: null } }
+  }
+  // One backend: no control, and no read carries a pick — the page is the one it was.
+  const plainCalls = []
+  const plain = page(async e => { plainCalls.push(e); return answer(e) })
+  plain.view.render(plain.state, null); await wait(30)
+  assert.equal(plain.root.querySelectorAll('select').length, 1)
+  assert.ok(plainCalls.every(({ query }) => query?.vcs === undefined))
+  plain.view.destroy(); plain.dom.window.close()
+  // A key the page does not know draws nothing either.
+  const odd = page(answer, undefined, { found: ['git', 'hg'], default: 'hg' })
+  odd.view.render(odd.state, null); await wait(30)
+  assert.equal(odd.root.querySelectorAll('select').length, 1)
+  odd.view.destroy(); odd.dom.window.close()
+  // Both: the control starts on the default and a pick reads the checkout again with it.
+  const calls = []
+  const both = page(async e => { calls.push(e); return answer(e) }, undefined, { found: ['git', 'svn'], default: 'git' })
+  both.view.render(both.state, null); await wait(30)
+  const select = both.root.querySelector('select[aria-label="Version control"]')
+  assert.ok(select, 'the control stands')
+  assert.equal(select.value, 'git')
+  assert.deepEqual([...select.options].map(o => o.textContent), ['git', 'svn'])
+  assert.ok(calls.some(({ path, query }) => path === '/api/changes' && query.vcs === 'git'))
+  calls.length = 0
+  select.value = 'svn'; select.dispatchEvent(new both.dom.window.Event('change')); await wait(30)
+  assert.ok(calls.some(({ path, query }) => path === '/api/changes' && query.root === '.' && query.vcs === 'svn'), JSON.stringify(calls))
+  assert.ok(calls.filter(({ path }) => path === '/api/changes').every(({ query }) => query.vcs === 'svn'))
+  both.view.destroy(); both.dom.window.close()
 })

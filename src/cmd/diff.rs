@@ -1,6 +1,6 @@
 //! CLI wiring for the shared change reader.
 use super::{Ctx, Fail, R};
-use crate::cli::{DiffArgs, DiffScope};
+use crate::cli::{DiffArgs, DiffScope, DiffVcs};
 use crate::report::changes::Scope;
 
 pub fn run(ctx: &Ctx, args: DiffArgs) -> R<Vec<String>> {
@@ -11,7 +11,11 @@ pub fn run(ctx: &Ctx, args: DiffArgs) -> R<Vec<String>> {
     if load.get(&args.id).is_none() {
         return Err(Fail::not_found(&args.id, ctx.lang()));
     }
-    let prepared = crate::changes::offers(&repo, &load.issues, &args.id, None, ctx.lang());
+    let vcs = args.vcs.map(|v| match v {
+        DiffVcs::Git => crate::vcs::Backend::Git,
+        DiffVcs::Svn => crate::vcs::Backend::Svn,
+    });
+    let prepared = crate::changes::offers(&repo, &load.issues, &args.id, None, ctx.lang(), vcs);
     let requested = args.scope.map(|s| match s {
         DiffScope::Commits => Scope::Commits,
         DiffScope::Branch => Scope::Branch,
@@ -24,9 +28,18 @@ pub fn run(ctx: &Ctx, args: DiffArgs) -> R<Vec<String>> {
                 crate::i18n::fill(crate::i18n::say(ctx.lang(), "diff.bad_scope"), &[("scopes", &names)])
             }
             crate::changes::RequestError::Path => crate::i18n::say(ctx.lang(), "diff.bad_path").to_owned(),
+            crate::changes::RequestError::Vcs { asked, found } => crate::view::diff_bad_vcs(ctx.lang(), asked, found),
+            crate::changes::RequestError::NoBranch { scopes, notice } => {
+                let names = scopes.iter().map(crate::view::scope_name).collect::<Vec<_>>().join(", ");
+                let refused = crate::i18n::fill(crate::i18n::say(ctx.lang(), "diff.bad_scope"), &[("scopes", &names)]);
+                format!("{refused} · {notice}")
+            }
         };
         Fail::coded(message, super::code::BAD_INPUT)
     })?;
+    if let Some(warning) = &answer.warning {
+        super::tell(warning);
+    }
     if ctx.json {
         return super::json_line(&answer);
     }

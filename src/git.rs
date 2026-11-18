@@ -112,7 +112,7 @@ fn absolute(s: &str) -> bool {
 /// **따옴표로 싼 경로는 닫는 따옴표까지 자른다.** git 은 경로를 대개 `'…'` 로 싸고 그 안에는 공백이
 /// 들 수 있다 — 낱말로만 자르면 `'/Users/John Smith/x'` 의 공백 뒤(`Smith/x`)가 그대로 나간다.
 /// 싸지 않은 경로는 낱말째 자른다.
-fn cut_paths(s: &str) -> String {
+pub(crate) fn cut_paths(s: &str) -> String {
     let mut quoted = String::with_capacity(s.len());
     let mut rest = s;
     while let Some(at) = rest.find(['\'', '"', '`']) {

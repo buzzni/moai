@@ -36302,3 +36302,370 @@ fn web_diff_matches_cli_and_rejects_unlisted_paths() {
         assert_eq!(status, 404, "{path}");
     }
 }
+
+// ── svn 작업 사본의 `moai diff`·웹 (moai-0d0s.qg0) ──────────────────────────
+
+/// 임시 svn 저장소 하나 — `svnadmin create` 와 `file://`, 그 밑의 `trunk`·`branches`·`tags`(r1). 시험이 부르는 svn 은 이
+/// 스크래치 안의 `--config-dir` 을 쓴다 — 사람의 `~/.subversion` 을 안 건드린다.
+struct SvnRepo {
+    s: Scratch,
+    url: String,
+}
+
+impl SvnRepo {
+    /// svn 이 없으면 한 줄 알리고 `None` — `MOAI_TEST_SVN=required`(CI 리눅스)면 건너뛰지 않고 붉어진다.
+    fn new(name: &str) -> Option<SvnRepo> {
+        let runs = |p: &str| Command::new(p).args(["--version", "--quiet"]).output().is_ok_and(|o| o.status.success());
+        if !(runs("svn") && runs("svnadmin")) {
+            assert_ne!(std::env::var("MOAI_TEST_SVN").as_deref(), Ok("required"), "svn 이나 svnadmin 을 못 띄운다");
+            eprintln!("svn 시험을 건너뛴다: svn 이 없다");
+            return None;
+        }
+        let s = Scratch::new(name);
+        let repo = s.path().join("repo");
+        let out = Command::new("svnadmin").arg("create").arg(&repo).output().unwrap();
+        assert!(out.status.success(), "{}", String::from_utf8_lossy(&out.stderr));
+        let p = repo.to_string_lossy().replace('\\', "/");
+        let url = if p.starts_with('/') { format!("file://{p}") } else { format!("file:///{p}") };
+        let r = SvnRepo { s, url };
+        let (t, b, g) = (format!("{}/trunk", r.url), format!("{}/branches", r.url), format!("{}/tags", r.url));
+        r.svn(r.s.path(), &["mkdir", "-q", "-m", "layout", &t, &b, &g]);
+        Some(r)
+    }
+
+    fn svn(&self, dir: &Path, args: &[&str]) -> String {
+        let out = Command::new("svn")
+            .current_dir(dir)
+            .stdin(Stdio::null())
+            .env("LC_MESSAGES", "C")
+            .args(args)
+            .arg("--non-interactive")
+            .arg("--config-dir")
+            .arg(self.s.path().join("svn-config"))
+            .output()
+            .unwrap();
+        assert!(out.status.success(), "svn {args:?}: {}", String::from_utf8_lossy(&out.stderr));
+        String::from_utf8_lossy(&out.stdout).into_owned()
+    }
+
+    fn checkout(&self, sub: &str, dir: &str) -> PathBuf {
+        let wc = self.s.path().join(dir);
+        self.svn(self.s.path(), &["checkout", "-q", &format!("{}/{sub}", self.url), &wc.to_string_lossy()]);
+        wc
+    }
+
+    /// 작업 사본의 버전 밖 것을 모두 더해 커밋한다.
+    fn commit_all(&self, wc: &Path, message: &str) {
+        self.svn(wc, &["add", "-q", "--force", "."]);
+        self.svn(wc, &["commit", "-q", "-m", message]);
+    }
+
+    fn copy(&self, from: &str, to: &str) {
+        let (from, to) = (format!("{}/{from}", self.url), format!("{}/{to}", self.url));
+        self.svn(self.s.path(), &["copy", "-q", "-m", "copy", &from, &to]);
+    }
+}
+
+/// `.svn` 밑의 이름·크기와 `wc.db` 의 바이트, 그리고 `.moai` 의 파일 — 읽기 전후로 견준다.
+fn svn_and_moai_bytes(wc: &Path) -> Vec<(String, u64, Vec<u8>)> {
+    fn walk(dir: &Path, base: &Path, out: &mut Vec<(String, u64, Vec<u8>)>) {
+        let Ok(entries) = std::fs::read_dir(dir) else { return };
+        for e in entries.flatten() {
+            let p = e.path();
+            let meta = std::fs::symlink_metadata(&p).unwrap();
+            let name = p.strip_prefix(base).unwrap().to_string_lossy().into_owned();
+            if meta.is_dir() {
+                walk(&p, base, out);
+            } else {
+                let keep = name.ends_with("wc.db") || name.starts_with(".moai");
+                out.push((name, meta.len(), if keep { std::fs::read(&p).unwrap() } else { Vec::new() }));
+            }
+        }
+    }
+    let mut out = Vec::new();
+    walk(&wc.join(".svn"), wc, &mut out);
+    walk(&wc.join(".moai"), wc, &mut out);
+    out.sort();
+    out
+}
+
+fn keys(v: &serde_json::Value) -> Vec<String> {
+    let mut k: Vec<String> = v.as_object().unwrap().keys().cloned().collect();
+    k.sort();
+    k
+}
+
+/// **`moai diff <id>` answers in an svn working copy as in Git** (moai-0d0s.qg0): the revision whose subject names
+/// the id is the `commits` scope, the `--json` keys are Git's, the patch is on stdout and the scope line on stderr,
+/// `--stat` has Git's form, the trunk refuses `--scope working`, a path not in the list is refused before anything is
+/// read — and `.svn` and `.moai` are as they were.
+#[test]
+fn svn_diff_answers_as_git_does_and_writes_nothing() {
+    let Some(r) = SvnRepo::new("svn-diff") else { return };
+    let wc = r.checkout("trunk", "wc");
+    ok(&wc, &["init", "argos"]);
+    let id = field(&ok(&wc, &["add", "svn issue", "--json"]), "id");
+    r.commit_all(&wc, "base");
+    std::fs::write(wc.join("a.txt"), "hello\n").unwrap();
+    r.commit_all(&wc, &format!("feat: {id}"));
+    let before = svn_and_moai_bytes(&wc);
+    let v = json_of(&ok(&wc, &["diff", &id, "--json"]));
+    assert_eq!(v["scope"], "commits", "{v}");
+    assert_eq!(keys(&v), ["files", "id", "offers", "scope", "total", "truncated"], "{v}");
+    let file = &v["files"][0];
+    assert_eq!((file["path"].as_str(), file["status"].as_str()), (Some("a.txt"), Some("added")), "{v}");
+    assert_eq!(keys(file), ["adds", "binary", "dels", "hunks", "old_path", "path", "status"]);
+    assert_eq!(file["hunks"][0]["lines"][0]["text"], "hello", "{v}");
+    let out = moai(&wc, &["diff", &id]);
+    let (stdout, stderr) = (String::from_utf8_lossy(&out.stdout), String::from_utf8_lossy(&out.stderr));
+    assert!(out.status.success() && stdout.contains("+hello") && !stdout.contains("commits ·"), "{stdout}");
+    assert!(stderr.starts_with("commits") && !stderr.contains("+hello"), "{stderr}");
+    assert_eq!(ok(&wc, &["diff", &id, "--stat"]), "A a.txt +1 -0\n");
+    for refused in [vec!["--scope", "working"], vec!["--path=--output=evil"], vec!["--path", "nowhere.txt"]] {
+        let mut args = vec!["diff", id.as_str(), "--json"];
+        args.extend(refused.iter().copied());
+        let out = moai(&wc, &args);
+        assert!(!out.status.success(), "{refused:?}");
+        assert_eq!(json_of(&String::from_utf8_lossy(&out.stderr))["code"], "bad_input", "{refused:?}");
+    }
+    assert!(!wc.join("evil").exists() && !wc.join("--output=evil").exists());
+    assert_eq!(svn_and_moai_bytes(&wc), before, "a read changed .svn or .moai");
+}
+
+/// **On `branches/<epic>` the epic is the checkout's issue** (moai-0d0s.qg0): the epic gets `working` while the
+/// working copy holds edits and `branch` by name; its picked member gets its own revisions first, not `working`.
+#[test]
+fn svn_diff_on_an_epics_branch_offers_it_working_and_branch() {
+    let Some(r) = SvnRepo::new("svn-diff-branch") else { return };
+    let trunk = r.checkout("trunk", "trunk");
+    ok(&trunk, &["init", "argos"]);
+    let epic = field(&ok(&trunk, &["add", "epic", "--type", "epic", "--json"]), "id");
+    let member = field(&ok(&trunk, &["add", "member", "-e", &epic, "--json"]), "id");
+    ok(&trunk, &["mv", &member, "in_progress"]);
+    r.commit_all(&trunk, "base");
+    r.copy("trunk", &format!("branches/{epic}"));
+    let wc = r.checkout(&format!("branches/{epic}"), "branch");
+    std::fs::write(wc.join("m.txt"), "member\n").unwrap();
+    r.commit_all(&wc, &format!("feat: {member}"));
+    std::fs::write(wc.join("e.txt"), "local\n").unwrap();
+    let v = json_of(&ok(&wc, &["diff", &epic, "--json"]));
+    assert_eq!(v["scope"], "working", "{v}");
+    let offered: Vec<_> = v["offers"].as_array().unwrap().iter().map(|o| o["scope"].clone()).collect();
+    assert_eq!(offered[..2], [serde_json::json!("working"), serde_json::json!("branch")], "{v}");
+    assert_eq!(v["offers"][0]["branch"], epic.as_str());
+    assert!(v["files"].as_array().unwrap().iter().any(|f| f["path"] == "e.txt"), "{v}");
+    assert!(moai(&wc, &["diff", &epic, "--scope", "branch", "--json"]).status.success());
+    let m = json_of(&ok(&wc, &["diff", &member, "--json"]));
+    assert_eq!(m["scope"], "commits", "{m}");
+    assert!(m["files"].as_array().unwrap().iter().any(|f| f["path"] == "m.txt"), "{m}");
+}
+
+/// **A working copy with no fork point says once that `branch` is not served** (moai-0d0s.qg0) — on stderr, never in
+/// `--json`, and in the `--scope branch` refusal.
+#[test]
+fn svn_diff_where_branch_is_not_served_says_so_on_stderr_only() {
+    let Some(r) = SvnRepo::new("svn-diff-tag") else { return };
+    let trunk = r.checkout("trunk", "trunk");
+    ok(&trunk, &["init", "argos"]);
+    let id = field(&ok(&trunk, &["add", "tagged", "--json"]), "id");
+    r.commit_all(&trunk, "base");
+    std::fs::write(trunk.join("a.txt"), "a\n").unwrap();
+    r.commit_all(&trunk, &format!("feat: {id}"));
+    r.copy("trunk", "tags/v1");
+    let wc = r.checkout("tags/v1", "tag");
+    let line = "branch 를 안 냅니다";
+    let out = moai(&wc, &["diff", &id]);
+    let stderr = String::from_utf8_lossy(&out.stderr);
+    assert!(out.status.success() && stderr.contains(line), "{stderr}");
+    assert_eq!(stderr.matches(line).count(), 1, "{stderr}");
+    assert!(!String::from_utf8_lossy(&out.stdout).contains(line));
+    let json = moai(&wc, &["diff", &id, "--json"]);
+    let v = json_of(&String::from_utf8_lossy(&json.stdout));
+    assert_eq!(keys(&v), ["files", "id", "offers", "scope", "total", "truncated"], "{v}");
+    assert!(!v.to_string().contains(line), "{v}");
+    let refused = moai(&wc, &["diff", &id, "--scope", "branch"]);
+    let said = String::from_utf8_lossy(&refused.stderr);
+    assert!(!refused.status.success() && said.contains(line), "{said}");
+}
+
+/// **No svn to run: `no_svn`, exit 0, and no word of git** — this one runs without svn on the machine, so every
+/// runner checks it (moai-0d0s.qg0).
+#[test]
+fn svn_diff_without_svn_says_no_svn() {
+    let s = init("svn-diff-no-svn");
+    let id = field(&ok(s.path(), &["add", "issue", "--json"]), "id");
+    std::fs::create_dir(s.path().join(".svn")).unwrap();
+    let empty = s.path().join("no-bin");
+    std::fs::create_dir(&empty).unwrap();
+    let out = staged(&["diff", &id, "--json"]).current_dir(s.path()).env("PATH", &empty).output().unwrap();
+    assert!(out.status.success(), "{out:?}");
+    let v = json_of(&String::from_utf8_lossy(&out.stdout));
+    assert_eq!(v["vcs_error"]["kind"], "no_svn", "{v}");
+    assert!(!v["vcs_error"]["said"].as_str().unwrap().to_lowercase().contains("git"), "{v}");
+}
+
+/// **A repository out of reach with no table kept answers `offline` in svn's words, its paths cut** (moai-0d0s.qg0) —
+/// and a table kept before still offers the revisions while the patch read is `offline`.
+#[test]
+fn svn_diff_with_the_repository_gone_says_offline() {
+    let Some(r) = SvnRepo::new("svn-diff-offline") else { return };
+    let wc = r.checkout("trunk", "wc");
+    ok(&wc, &["init", "argos"]);
+    let id = field(&ok(&wc, &["add", "issue", "--json"]), "id");
+    r.commit_all(&wc, "base");
+    std::fs::write(wc.join("a.txt"), "a\n").unwrap();
+    r.commit_all(&wc, &format!("feat: {id}"));
+    let cache = r.s.path().join("cache");
+    let diff = |cache: &Path| {
+        let out = staged(&["diff", &id, "--json"]).current_dir(&wc).env("XDG_CACHE_HOME", cache).output().unwrap();
+        assert!(out.status.success(), "{out:?}");
+        json_of(&String::from_utf8_lossy(&out.stdout))
+    };
+    assert_eq!(diff(&cache)["scope"], "commits");
+    std::fs::rename(r.s.path().join("repo"), r.s.path().join("gone")).unwrap();
+    let kept = diff(&cache);
+    assert_eq!(
+        (kept["vcs_error"]["kind"].as_str(), kept["offers"][0]["scope"].as_str()),
+        (Some("offline"), Some("commits")),
+        "{kept}"
+    );
+    let fresh = diff(&r.s.path().join("empty-cache"));
+    assert_eq!(fresh["vcs_error"]["kind"], "offline", "{fresh}");
+    let said = fresh["vcs_error"]["said"].as_str().unwrap();
+    assert!(!said.to_lowercase().contains("git") && !said.contains(&*r.s.path().to_string_lossy()), "{said}");
+}
+
+/// **Git and svn both found: git unless asked** (moai-0d0s.qg0) — `--vcs` over `[vcs] backend` over git; a backend not
+/// found is refused naming what is; a value nobody knows reads as the default with one line on stderr, never in
+/// `--json`. The web's checkout list carries the choice only here, and its `vcs=` takes only a found backend.
+#[test]
+fn git_and_svn_both_found_choose_by_flag_then_config_then_git() {
+    let Some(r) = SvnRepo::new("svn-git-both") else { return };
+    let wc = r.checkout("trunk", "wc");
+    git(&wc, &["init", "-q"]);
+    std::fs::write(wc.join(".gitignore"), ".svn/\n").unwrap();
+    ok(&wc, &["init", "argos"]);
+    let id = field(&ok(&wc, &["add", "both", "--json"]), "id");
+    git(&wc, &["add", "-A"]);
+    git(&wc, &["commit", "-qm", "base"]);
+    std::fs::write(wc.join("g.txt"), "git\n").unwrap();
+    git(&wc, &["add", "g.txt"]);
+    git(&wc, &["commit", "-qm", &format!("feat: {id}")]);
+    std::fs::write(wc.join("s.txt"), "svn\n").unwrap();
+    r.svn(&wc, &["add", "-q", "s.txt"]);
+    r.svn(&wc, &["commit", "-q", "-m", &format!("feat: {id}"), "s.txt"]);
+    let files = |args: &[&str]| {
+        let mut all = vec!["diff", id.as_str(), "--scope", "commits", "--json"];
+        all.extend_from_slice(args);
+        let v = json_of(&ok(&wc, &all));
+        v["files"].as_array().unwrap().iter().map(|f| f["path"].as_str().unwrap().to_owned()).collect::<Vec<_>>()
+    };
+    assert_eq!(files(&[]), ["g.txt"]);
+    assert_eq!(files(&["--vcs", "svn"]), ["s.txt"]);
+    let config = wc.join(".moai/config.toml");
+    let plain = std::fs::read_to_string(&config).unwrap();
+    std::fs::write(&config, format!("{plain}\n[vcs]\nbackend = \"svn\"\n")).unwrap();
+    assert_eq!(files(&[]), ["s.txt"]);
+    assert_eq!(files(&["--vcs", "git"]), ["g.txt"]);
+    std::fs::write(&config, format!("{plain}\n[vcs]\nbackend = \"hg\"\n")).unwrap();
+    let out = moai(&wc, &["diff", &id, "--scope", "commits", "--json"]);
+    let (stdout, stderr) = (String::from_utf8_lossy(&out.stdout), String::from_utf8_lossy(&out.stderr));
+    assert!(out.status.success() && stderr.contains("\"hg\"") && !stdout.contains("hg"), "{stdout}\n{stderr}");
+    assert_eq!(json_of(&stdout)["files"][0]["path"], "g.txt");
+    std::fs::write(&config, &plain).unwrap();
+    // The web: the one key, the pick of a found backend, the refusal of the rest.
+    let web = serve(&wc);
+    let (_, _, body) = get(web.port, "/api/checkouts");
+    assert_eq!(json_of(&body)["out"]["vcs"], serde_json::json!({"found": ["git", "svn"], "default": "git"}), "{body}");
+    std::fs::write(wc.join("s.txt"), "svn\nlocal\n").unwrap();
+    let listed = |q: &str| {
+        let (status, _, body) = get(web.port, &format!("/api/changes?root=.{q}"));
+        assert_eq!(status, 200, "{q}: {body}");
+        let out = json_of(&body)["out"].clone();
+        let status =
+            |p: &str| out["files"].as_array().unwrap().iter().find(|f| f["path"] == p).map(|f| f["status"].clone());
+        (status("s.txt"), status("g.txt"))
+    };
+    // Each backend versions its own file and sees the other's as untracked.
+    let (modified, untracked) = (Some(serde_json::json!("modified")), Some(serde_json::json!("untracked")));
+    assert_eq!(listed("&vcs=svn"), (modified.clone(), untracked.clone()));
+    assert_eq!(listed("&vcs=git"), (untracked.clone(), None));
+    assert_eq!(listed(""), (untracked, None));
+    for refused in ["&vcs=hg", "&vcs=SVN", "&id=x&vcs=svn"] {
+        assert_eq!(get(web.port, &format!("/api/changes?root=.{refused}")).0, 400, "{refused}");
+    }
+    drop(web);
+    // Git alone: no key, and `--vcs svn` refused naming git.
+    let s = Scratch::new("svn-git-only");
+    git(s.path(), &["init", "-q"]);
+    ok(s.path(), &["init", "argos"]);
+    let only = field(&ok(s.path(), &["add", "git only", "--json"]), "id");
+    let out = moai(s.path(), &["diff", &only, "--vcs", "svn"]);
+    let said = String::from_utf8_lossy(&out.stderr);
+    assert!(!out.status.success() && said.contains("svn") && said.contains("git"), "{said}");
+    let web = serve(s.path());
+    let (_, _, body) = get(web.port, "/api/checkouts");
+    assert!(json_of(&body)["out"].get("vcs").is_none(), "{body}");
+    assert_eq!(get(web.port, "/api/changes?root=.&vcs=svn").0, 400);
+}
+
+/// **The web answers an svn working copy as the CLI does** (moai-0d0s.qg0): the checkout's list is no "unavailable",
+/// the ignored folders carry `.svn/` and `svn:ignore`'s, and an issue's diff is `moai diff --json`'s.
+#[test]
+fn web_answers_an_svn_working_copy_as_the_cli_does() {
+    let Some(r) = SvnRepo::new("svn-web") else { return };
+    let wc = r.checkout("trunk", "wc");
+    ok(&wc, &["init", "argos"]);
+    let id = field(&ok(&wc, &["add", "issue", "--json"]), "id");
+    std::fs::create_dir(wc.join("build")).unwrap();
+    r.svn(&wc, &["add", "-q", "--force", "--depth", "files", "."]);
+    r.svn(&wc, &["add", "-q", "--force", ".moai"]);
+    r.svn(&wc, &["propset", "-q", "svn:ignore", "build", "."]);
+    r.commit_all(&wc, "base");
+    std::fs::write(wc.join("sample.rs"), "let text = \"한글\";\n").unwrap();
+    r.commit_all(&wc, &format!("feat: {id}"));
+    std::fs::write(wc.join("sample.rs"), "let text = \"한글\";\nlet more = 1;\n").unwrap();
+    let cli = json_of(&ok(&wc, &["diff", &id, "--scope=commits", "--json"]));
+    let web = serve(&wc);
+    let (status, _, body) = get(web.port, "/api/changes?root=.");
+    assert_eq!(status, 200, "{body}");
+    let out = &json_of(&body)["out"];
+    assert!(out.get("vcs_error").is_none(), "{body}");
+    assert!(out["files"].as_array().unwrap().iter().any(|f| f["path"] == "sample.rs" && f["mark"] == "M"), "{body}");
+    let (_, _, body) = get(web.port, "/api/ignored");
+    let dirs = json_of(&body)["out"]["dirs"].clone();
+    assert!(
+        dirs.as_array().unwrap().iter().any(|d| d == ".svn/") && dirs.as_array().unwrap().iter().any(|d| d == "build/"),
+        "{dirs}"
+    );
+    let (status, _, body) = get(web.port, &format!("/api/diff?id={id}&scope=commits"));
+    assert_eq!(status, 200, "{body}");
+    let mut response = json_of(&body)["out"].clone();
+    assert!(response.as_object_mut().unwrap().remove("highlight").is_some());
+    for file in response["files"].as_array_mut().unwrap() {
+        assert!(file.as_object_mut().unwrap().remove("mark").is_some());
+        for hunk in file["hunks"].as_array_mut().unwrap() {
+            for line in hunk["lines"].as_array_mut().unwrap() {
+                line.as_object_mut().unwrap().remove("spans");
+            }
+        }
+    }
+    assert_eq!(response, cli);
+    assert!(json_of(&get(web.port, "/api/checkouts").2)["out"].get("vcs").is_none());
+    assert_eq!(get(web.port, "/api/changes?root=.&vcs=git").0, 400);
+}
+
+/// **The web says an svn failure in svn's words, not the fixed "version control unavailable"** (moai-0d0s.qg0) — a
+/// `.svn` svn cannot read (or no svn at all: then `no_svn`), so it runs on every runner.
+#[test]
+fn web_says_an_svn_failure_in_svn_words() {
+    let s = init("web-svn-failure");
+    std::fs::create_dir(s.path().join(".svn")).unwrap();
+    let web = serve(s.path());
+    let (status, _, body) = get(web.port, "/api/changes?root=.");
+    assert_eq!(status, 200, "{body}");
+    let error = json_of(&body)["out"]["vcs_error"].clone();
+    assert!(matches!(error["kind"].as_str(), Some("failed" | "no_svn")), "{body}");
+    let said = error["said"].as_str().unwrap();
+    assert!(said != "version control unavailable" && !said.to_lowercase().contains("git"), "{said}");
+}

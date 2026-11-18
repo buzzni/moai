@@ -380,7 +380,6 @@ pub(crate) struct Branch {
 
 impl Layout {
     /// The branch's name, when the working copy stands on one.
-    #[allow(dead_code)] // moai-0d0s.qg0 asks "is this working copy a branch?" through `layout_at` and this.
     pub(crate) fn branch_name(&self) -> Option<&str> {
         match self {
             Layout::Branch(b) => Some(&b.name),
@@ -411,7 +410,6 @@ pub(crate) fn layout(relative_url: &str) -> Layout {
 
 /// The working copy at `root`, read with `info` (local, no server) and placed by [`layout`]. **The one seam moai-0d0s.qg0
 /// asks "is this working copy a branch?" through** — the `branch`·`whole` scopes decide by the same [`layout`].
-#[allow(dead_code)] // moai-0d0s.qg0 (scope offers, the "branch is not served" line) uses this.
 pub(crate) fn layout_at(root: &Path, budget: Option<Duration>) -> Result<Layout, Error> {
     Ok(layout(&info(root, "", budget)?.relative_url))
 }
@@ -597,7 +595,6 @@ fn log_entries(text: &str) -> Vec<(u64, String)> {
 /// [`SERVER_TIMEOUT`] all told (the person's "30 seconds for `moai diff`, keeping what was filled"), and every server
 /// call keeps its own [`SERVER_TIMEOUT`] too. A table never completed answers nothing — the read is
 /// [`Error::Filling`] or the reason it stopped — and a table completed before answers when the server cannot.
-#[allow(dead_code)] // moai-0d0s.qg0 wires this into `changes::offers`.
 pub(crate) fn commits_within(
     root: &Path,
     id: &str,

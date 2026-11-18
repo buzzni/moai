@@ -50,8 +50,9 @@ export async function issuePatch(client: Client, id: string, scope: Scope, path:
   return validDiff(result.output) ? { ok: true, value: result.output } : { ok: false, why: 'failed' }
 }
 /** One checkout's file patch, `/api/diff?root=…&path=…` (the files tab); `path` comes from that checkout's change list. */
-export async function checkoutPatch(client: Client, root: string, path: string, background = false): Promise<Read<DiffAnswer>> {
-  const result = await client.request({ path: '/api/diff', query: { root, path } }, options(PATCH_GROUP.files, background))
+export async function checkoutPatch(client: Client, root: string, path: string, background = false, vcs?: string): Promise<Read<DiffAnswer>> {
+  const query: Record<string, string> = vcs === undefined ? { root, path } : { root, path, vcs }
+  const result = await client.request({ path: '/api/diff', query }, options(PATCH_GROUP.files, background))
   if (result.kind !== 'passed') return whyNot(result)
   return validDiff(result.output) ? { ok: true, value: result.output } : { ok: false, why: 'failed' }
 }

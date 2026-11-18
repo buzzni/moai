@@ -2148,7 +2148,8 @@ fn files_detail_pane(f: &mut Frame, w: &mut super::files::Window, at: Rect, line
 /// one standing now with a word too. The main checkout is the first row.
 fn files_pick(f: &mut Frame, w: &mut super::files::Window, at: Rect, titles: &[Option<String>], lang: Lang) {
     let width = at.width.min(96);
-    let n = w.places.as_ref().map_or(1, |p| p.checkouts.len().max(1));
+    let vcs_rows = w.vcs_rows();
+    let n = w.places.as_ref().map_or(1, |p| (p.checkouts.len() + vcs_rows.len()).max(1));
     let height = (n as u16 + 2).min(at.height);
     let area =
         Rect { x: at.x + (at.width - width) / 2, y: at.y + (at.height.saturating_sub(height)) / 3, width, height };
@@ -2190,9 +2191,26 @@ fn files_pick(f: &mut Frame, w: &mut super::files::Window, at: Rect, titles: &[O
             ListItem::new(fit(Line::from(spans), room))
         })
         .collect();
+    // git·svn — only where both stand over the checkout (moai-0d0s.qg0). The one read with now is named in words.
+    let reading = w.reading_with();
+    let items: Vec<ListItem> = items
+        .into_iter()
+        .chain(vcs_rows.iter().map(|b| {
+            let mut spans = vec![
+                Span::raw("  "),
+                Span::styled(format!("{} ", say(lang, "tui.files.pick_vcs")), dim()),
+                Span::styled(b.word(), bold()),
+            ];
+            if Some(*b) == reading {
+                spans.push(Span::styled(format!("  {}", say(lang, "tui.files.pick_now")), dim()));
+            }
+            ListItem::new(fit(Line::from(spans), room))
+        }))
+        .collect();
+    let rows = places.checkouts.len() + vcs_rows.len();
     let Some(p) = w.pick.as_mut() else { return };
-    p.cursor = p.cursor.min(places.checkouts.len().saturating_sub(1));
-    p.list.fit(inner.height as usize, places.checkouts.len());
+    p.cursor = p.cursor.min(rows.saturating_sub(1));
+    p.list.fit(inner.height as usize, rows);
     p.list.reveal(p.cursor);
     let top = p.list.offset();
     let items: Vec<ListItem> = items.into_iter().skip(top).collect();

@@ -67,7 +67,6 @@ pub enum Error {
     /// budget running out is [`Error::Timeout`], never this.
     Svn(crate::svn::Error),
     /// `branch` is not served for this working copy (no known fork point). The reason says why.
-    #[allow(dead_code)] // moai-0d0s.qg0 reads the reason to word the "branch is not served" line.
     NoBase(NoBase),
     Timeout,
     Limit,
@@ -113,7 +112,6 @@ pub struct Detected {
     pub svn: bool,
 }
 impl Detected {
-    #[allow(dead_code)] // moai-0d0s.qg0 (the surfaces' git·svn choice) uses this.
     pub fn has(self, backend: Backend) -> bool {
         match backend {
             Backend::Git => self.git,
@@ -144,7 +142,6 @@ pub fn detect(root: &Path) -> Option<Backend> {
 }
 /// What people asked for, strongest first: `moai diff --vcs`, the window's or tab's choice, `.moai/config.toml`'s
 /// `[vcs] backend` ([`configured`]).
-#[allow(dead_code)] // moai-0d0s.qg0 (the surfaces' git·svn choice) uses this.
 #[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
 pub struct Asked {
     pub flag: Option<Backend>,
@@ -154,11 +151,9 @@ pub struct Asked {
 /// **The one place the backend is chosen.** The strongest ask whose backend is detected wins; an ask for a backend
 /// that is not detected is passed over, and with none left the default answers. Pure: no disk, no program. A surface
 /// that must refuse an undetected `--vcs` asks [`Detected::has`] before it gets here.
-#[allow(dead_code)] // moai-0d0s.qg0 (the surfaces' git·svn choice) uses this.
 pub fn choose(found: Detected, asked: Asked) -> Option<Backend> {
     [asked.flag, asked.screen, asked.config].into_iter().flatten().find(|b| found.has(*b)).or(found.default_backend())
 }
-#[allow(dead_code)] // moai-0d0s.qg0 (`--vcs`, the config warning) uses these.
 impl Backend {
     /// The word a person writes for it — `[vcs] backend`, `--vcs`.
     pub fn word(self) -> &'static str {
@@ -173,7 +168,6 @@ impl Backend {
 }
 /// `.moai/config.toml`'s `[vcs] backend`, read where it is used — [`crate::config::Config::parse`] keeps the table as
 /// written, so a value it does not know never stops a command.
-#[allow(dead_code)] // moai-0d0s.qg0 (the surfaces' git·svn choice) uses this.
 #[derive(Debug, Clone, Default, PartialEq, Eq)]
 pub struct Configured {
     pub backend: Option<Backend>,
@@ -183,7 +177,6 @@ pub struct Configured {
 }
 /// Read `[vcs]` (the [`crate::config::Config::vcs`] rows). The last `backend` line wins, as a TOML reader's error
 /// would be worse than either.
-#[allow(dead_code)] // moai-0d0s.qg0 (the surfaces' git·svn choice) uses this.
 pub fn configured(table: &[crate::config::ModelEntry]) -> Configured {
     let Some(row) = table.iter().rev().find(|e| e.key == "backend") else { return Configured::default() };
     match row.word().and_then(Backend::of_word) {
