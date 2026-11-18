@@ -19,7 +19,9 @@ const boot = {
   columns: { backlog: { name: 'backlog', glyph: '◇' }, shelved: { name: 'shelved', glyph: '‖' } },
   filter_keys: ['status'], sort_fields: [{ name: 'priority', dir: 'asc' }],
 }
-const row = { id: 'test-1234', title: 'Planned row', kind: 'issue', status: 'todo', priority: 2, starts_on: '2026-10-26', due_on: '2026-10-28' }
+// Dates stand relative to the wall clock (the boot says UTC): a fixed date drifts out of the chart's visible range.
+const day = (offset) => new Date(Date.now() + offset * 86_400_000).toISOString().slice(0, 10)
+const row = { id: 'test-1234', title: 'Planned row', kind: 'issue', status: 'todo', priority: 2, starts_on: day(0), due_on: day(2) }
 const gantt = { id: row.id, kind: row.kind, planned: { start: row.starts_on, end: row.due_on, from: 'own' }, actual: { kind: 'not_started' }, progress: { kind: 'column', name: 'todo' }, overdue: null, deferred: false, blocked_by: [] }
 // Up to ~10 s: the whole page boots in jsdom, and a machine running several sessions at once is slow to.
 const until = async (check) => {
