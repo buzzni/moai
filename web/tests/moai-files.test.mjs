@@ -664,3 +664,45 @@ test('the git·svn control stands only when the checkouts answer names both, and
   assert.ok(calls.filter(({ path }) => path === '/api/changes').every(({ query }) => query.vcs === 'svn'))
   both.view.destroy(); both.dom.window.close()
 })
+test('the git·svn pick rides only the current checkout: another checkout reads without it and the control steps aside', async () => {
+  // The `vcs` key speaks of the current checkout alone. A worktree outside the svn working copy refuses `vcs=svn`
+  // with 400 on every read (epic-end review finding 10), so there the pick is not sent at all.
+  const calls = []
+  const checkouts = [
+    { key: '.', branch: 'develop', main: true, current: true, issue: null, milestone: null },
+    { key: 'wt', branch: 'worktree-x', main: false, current: false, issue: null, milestone: null },
+  ]
+  const answer = async (e) => {
+    calls.push(e)
+    const { path, query } = e
+    if (query?.root === 'wt' && query.vcs !== undefined) return { kind: 'failed', status: 400, said: 'bad request' }
+    if (path === '/api/files') return { kind: 'passed', output: { entries: [entry('changed')], truncated: false } }
+    if (path === '/api/changes') return { kind: 'passed', output: { files: [{ path: 'changed', status: 'modified', old_path: null, adds: 1, dels: 0, binary: false }] } }
+    if (path === '/api/ignored') return { kind: 'passed', output: { dirs: [] } }
+    if (path === '/api/find') return { kind: 'passed', output: { matches: [], total: 0, truncated: false, walk_truncated: false, ignored_unavailable: false } }
+    return { kind: 'passed', output: { path: query.path, text: '', binary: false, truncated: false, spans: null } }
+  }
+  const p = page(answer, checkouts, { found: ['git', 'svn'], default: 'git' })
+  p.view.render(p.state, null); await wait(30)
+  const vcsSelect = p.root.querySelector('select[aria-label="Version control"]')
+  const field = vcsSelect.closest('.m-files-vcs')
+  vcsSelect.value = 'svn'; vcsSelect.dispatchEvent(new p.dom.window.Event('change')); await wait(30)
+  assert.ok(calls.some(({ path, query }) => path === '/api/changes' && query.root === '.' && query.vcs === 'svn'))
+  assert.equal(field.hidden, false)
+  assert.equal(JSON.parse(p.view.fileWatch().changeKey)[2], 'svn')
+  calls.length = 0
+  const checkoutSelect = p.root.querySelector('select:not([aria-label="Version control"])')
+  checkoutSelect.value = 'wt'; checkoutSelect.dispatchEvent(new p.dom.window.Event('change')); await wait(30)
+  const theirs = calls.filter(({ query }) => query?.root === 'wt')
+  assert.ok(theirs.some(({ path }) => path === '/api/changes'), JSON.stringify(calls))
+  assert.ok(theirs.every(({ query }) => query.vcs === undefined), JSON.stringify(theirs))
+  assert.equal(field.hidden, true, 'the control does not speak for this checkout')
+  assert.equal(p.view.fileWatch().changeKey, 'root:wt')
+  assert.doesNotMatch(p.root.querySelector('.m-files-message').textContent, /error/i)
+  // Back on the current checkout, the tab's pick is sent again.
+  calls.length = 0
+  checkoutSelect.value = '.'; checkoutSelect.dispatchEvent(new p.dom.window.Event('change')); await wait(30)
+  assert.equal(field.hidden, false)
+  assert.ok(calls.filter(({ path }) => path === '/api/changes').every(({ query }) => query.vcs === 'svn'), JSON.stringify(calls))
+  p.view.destroy(); p.dom.window.close()
+})
