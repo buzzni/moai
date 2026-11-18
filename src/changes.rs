@@ -55,6 +55,10 @@ pub struct Prepared {
     offered: Offered,
     commits: Vec<git::Commit>,
     error: Option<git::Told>,
+    /// svn only: the id → revision table could not be read (the server out of reach, the table still filling). Unlike
+    /// [`Prepared::error`] it does not stop the reads that need no server — `working`, and the scopes of a branch whose
+    /// fork point is kept — so the answer is this only when nothing else can be read.
+    unread: Option<git::Told>,
     lang: crate::i18n::Lang,
     /// The backend chosen for this read ([`vcs::choose`]); `None` when neither is found.
     backend: Option<vcs::Backend>,
@@ -165,6 +169,7 @@ pub fn offers(
         offered: Offered::default(),
         commits: Vec::new(),
         error: None,
+        unread: None,
         lang,
         backend,
         refused: None,
@@ -252,12 +257,12 @@ fn svn_offers(p: &mut Prepared, repo: &Repo, issues: &[model::Issue], budget: Op
             }
         })
         .collect();
+    // A table that cannot be read leaves `commits` unknown, not every scope: the rest are offered as with no revision.
     let mut commits = match crate::svn::commits_within(&p.root, &p.id, budget) {
         Ok(c) => c,
         Err(e) => {
-            p.error = fail(e);
-            p.checkouts = checkouts;
-            return;
+            p.unread = fail(e);
+            Vec::new()
         }
     };
     commits.retain(|c| !c.tracker);
@@ -295,11 +300,16 @@ impl Prepared {
             _ => vcs::detect(root),
         }
     }
-    /// A failed read as the surfaces say it. Under `moai diff`'s 30-second cap for svn, a read cut by the cap is the
-    /// server's silence — the only svn calls that can take that long are the ones that reach it — so it is `offline`.
-    fn fail(&self, root: &Path, e: vcs::Error, budget: Option<Duration>) -> git::Told {
+    /// A failed read as the surfaces say it. Under `moai diff`'s 30-second cap for svn, a server scope's read cut by the
+    /// cap is the server's silence, so it is `offline`. `working` never asks the server: its read cut by the cap is a
+    /// `timeout` — saying the server did not answer would name something never asked. A read that ran out of time while
+    /// the revision table was not read ([`Prepared::unread`]) lost its time to the table, and says that.
+    fn fail(&self, root: &Path, e: vcs::Error, budget: Option<Duration>, scope: Scope) -> git::Told {
+        if let (Some(unread), vcs::Error::Timeout) = (&self.unread, &e) {
+            return git::Told { kind: unread.kind, said: unread.said.clone() };
+        }
         let e = match e {
-            vcs::Error::Timeout if budget.is_none() && self.cap.is_some() => {
+            vcs::Error::Timeout if budget.is_none() && self.cap.is_some() && scope != Scope::Working => {
                 vcs::Error::Svn(crate::svn::Error::Offline(None))
             }
             e => e,
@@ -349,6 +359,12 @@ impl Prepared {
             answer.vcs_error = Some(git::Told { kind: error.kind, said: error.said.clone() });
             return Ok(answer);
         }
+        // svn's table not read: `commits` asked for by name, or nothing else offered, is that failure.
+        let unread = || self.unread.as_ref().map(|t| git::Told { kind: t.kind, said: t.said.clone() });
+        if self.unread.is_some() && (self.offered.order.is_empty() || requested == Some(Scope::Commits)) {
+            answer.vcs_error = unread();
+            return Ok(answer);
+        }
         let candidates: Vec<_> = self.offered.order.iter().filter(|o| requested.is_none_or(|s| o.scope == s)).collect();
         if requested.is_some() && candidates.is_empty() {
             let scopes = self.offered.order.iter().map(|o| o.scope).collect();
@@ -380,17 +396,31 @@ impl Prepared {
                     }
                 }
                 Err(e) => {
-                    answer.vcs_error = Some(self.fail(self.checkout(offer), e, budget));
+                    answer.vcs_error = Some(self.fail(self.checkout(offer), e, budget, offer.scope));
                     return Ok(answer);
                 }
             }
         }
-        let Some((offer, mut changes)) = selected else {
+        // With the table not read, an empty answer is no "nothing changed" — the revisions may hold it.
+        let Some((offer, mut changes)) =
+            selected.filter(|(_, c)| requested.is_some() || self.unread.is_none() || c.total > 0)
+        else {
+            if self.unread.is_some() {
+                answer.vcs_error = unread();
+                return Ok(answer);
+            }
             if path.is_some() {
                 return Err(RequestError::Path);
             }
             return Ok(answer);
         };
+        // A scope that needed no table answered: say once that the revisions were not looked up.
+        if let Some(t) = &self.unread {
+            answer.notice = Some(match answer.notice.take() {
+                Some(n) => format!("{n} · {}", t.said),
+                None => t.said.clone(),
+            });
+        }
         answer.scope = Some(offer.scope);
         answer.total = changes.total;
         answer.truncated = changes.truncated;
@@ -407,7 +437,7 @@ impl Prepared {
         let root = self.checkout(offer);
         let Some(backend) = self.backend_at(root) else {
             let e = vcs::Error::Git(git::Error::Failed("not a git repository".into()));
-            answer.vcs_error = Some(self.fail(root, e, budget));
+            answer.vcs_error = Some(self.fail(root, e, budget, offer.scope));
             return Ok(answer);
         };
         // A renamed file is read by both names: Git narrows to the pathspec before it looks for renames, so the new name
@@ -445,7 +475,7 @@ impl Prepared {
                     }
                     Ok(_) => {}
                     Err(e) => {
-                        answer.vcs_error = Some(self.fail(root, e, budget));
+                        answer.vcs_error = Some(self.fail(root, e, budget, Scope::Commits));
                         return Ok(answer);
                     }
                 }
@@ -462,7 +492,7 @@ impl Prepared {
                     patch_cut |= patch.truncated;
                 }
                 Err(e) => {
-                    answer.vcs_error = Some(self.fail(root, e, budget));
+                    answer.vcs_error = Some(self.fail(root, e, budget, offer.scope));
                     return Ok(answer);
                 }
             }
@@ -578,6 +608,7 @@ mod tests {
             offered: Offered::default(),
             commits: Vec::new(),
             error: None,
+            unread: None,
             lang: Lang::En,
             backend,
             refused: None,
@@ -587,17 +618,26 @@ mod tests {
         }
     }
 
-    /// **Under `moai diff`'s 30-second cap a cut svn read is the server's silence** — `offline`, not the caller's
-    /// `timeout` (the person's "svn reads only, 30 seconds"). A caller with its own budget (the screens) keeps `timeout`,
-    /// and Git never has the cap.
+    /// **Under `moai diff`'s 30-second cap a cut svn read of a server scope is the server's silence** — `offline`, not
+    /// the caller's `timeout` (the person's "svn reads only, 30 seconds"). `working` asks no server, so its cut read
+    /// stays `timeout`; a caller with its own budget (the screens) keeps `timeout`, and Git never has the cap. A read
+    /// that ran out of time behind a table not read says the table's failure.
     #[test]
     fn a_read_cut_by_moai_diffs_cap_is_offline() {
         let svn = prepared(Some(vcs::Backend::Svn), Some(Instant::now()));
         let root = Path::new("/");
-        assert_eq!(svn.fail(root, vcs::Error::Timeout, None).kind, "offline");
-        assert_eq!(svn.fail(root, vcs::Error::Timeout, Some(Duration::from_secs(10))).kind, "timeout");
+        for scope in [Scope::Commits, Scope::Branch] {
+            assert_eq!(svn.fail(root, vcs::Error::Timeout, None, scope).kind, "offline", "{scope:?}");
+        }
+        assert_eq!(svn.fail(root, vcs::Error::Timeout, None, Scope::Working).kind, "timeout");
+        assert_eq!(svn.fail(root, vcs::Error::Timeout, Some(Duration::from_secs(10)), Scope::Commits).kind, "timeout");
         let git = prepared(Some(vcs::Backend::Git), None);
-        assert_eq!(git.fail(root, vcs::Error::Timeout, None).kind, "timeout");
+        assert_eq!(git.fail(root, vcs::Error::Timeout, None, Scope::Commits).kind, "timeout");
+        let mut filling = prepared(Some(vcs::Backend::Svn), None);
+        let said = crate::i18n::say(Lang::En, "diff.svn.filling").to_owned();
+        filling.unread = Some(git::Told { kind: "timeout", said: said.clone() });
+        let t = filling.fail(root, vcs::Error::Timeout, Some(Duration::ZERO), Scope::Working);
+        assert_eq!((t.kind, t.said), ("timeout", said));
     }
 
     fn issue(id: &str, kind: Kind, status: &str, epic: Option<&str>) -> Issue {
@@ -691,5 +731,41 @@ mod tests {
             }
             other => panic!("not refused with the line: {:?}", other.err()),
         }
+    }
+
+    /// **A revision table that cannot be read leaves `commits` unknown, not every scope** (the epic-end review of
+    /// moai-0d0s): on an epic's branch with the repository gone and no table kept, `working` still answers with the
+    /// local edit and says once that the revisions were not looked up; `commits` asked for by name, and an issue offered
+    /// nothing else, answer the table's failure.
+    #[test]
+    fn a_table_out_of_reach_leaves_the_local_scopes_answering() {
+        if !svn_ready() {
+            return;
+        }
+        let repo = SvnRepo::new("changes-svn-unread");
+        let (epic, other) = ("argos-ep01", "argos-ot01");
+        let issues = vec![issue(epic, Kind::Epic, "in_progress", None), issue(other, Kind::Issue, "todo", None)];
+        let trunk = repo.checkout("trunk", "trunk");
+        commit_files(&trunk, &[("a.txt", "a\n")], "base");
+        repo.branch(epic);
+        let branch = repo.checkout(&format!("branches/{epic}"), "branch");
+        std::fs::write(branch.join("a.txt"), "a\nlocal\n").unwrap();
+        std::fs::rename(repo.scratch.join("repo"), repo.scratch.join("gone")).unwrap();
+        let cache = repo.scratch.join("cache");
+        let ask = |id: &str| {
+            let mut tracker = tracker();
+            tracker.root = branch.clone();
+            crate::svn::cache::tests::with_dir(Some(&cache), || offers(&tracker, &issues, id, None, Lang::En, None))
+        };
+        let on_branch = ask(epic);
+        assert!(on_branch.error.is_none() && on_branch.unread.as_ref().is_some_and(|t| t.kind == "offline"));
+        let answer = on_branch.read(None, None, true, None).expect("read");
+        assert_eq!((answer.scope, answer.vcs_error.as_ref().map(|e| e.kind)), (Some(Scope::Working), None));
+        assert!(answer.files.iter().any(|f| f.change.path == "a.txt"), "{:?}", answer.files.len());
+        assert!(answer.notice.as_deref().is_some_and(|n| n.contains("svn")), "{:?}", answer.notice);
+        let commits = on_branch.read(Some(Scope::Commits), None, true, None).expect("read");
+        assert_eq!(commits.vcs_error.map(|e| e.kind), Some("offline"));
+        let nothing_else = ask(other).read(None, None, true, None).expect("read");
+        assert_eq!(nothing_else.vcs_error.map(|e| e.kind), Some("offline"));
     }
 }

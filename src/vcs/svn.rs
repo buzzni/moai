@@ -19,7 +19,8 @@
 //! - the scopes: `working` is BASE against the working copy; `commits` reads each revision `r<n>` from the
 //!   repository, the root's URL at its BASE — the revisions themselves come from [`crate::svn::commits_within`]
 //!   (moai-0d0s.4o8). `branch` and `whole` go by where the working copy stands ([`crate::svn::layout`], moai-0d0s.x27):
-//!   on a branch copied from somewhere, `branch` is that fork point against BASE, both sides URLs, and `whole` the fork
+//!   on a branch copied from somewhere, `branch` is that fork point against each node's BASE (`./@BASE` — not the
+//!   root's revision, which `svn commit` leaves behind until an update), and `whole` the fork
 //!   point against the working copy with untracked files from `status`; on the trunk `branch` is empty; with no fork
 //!   point known (no convention, a branch made by `svn mkdir`) `branch` is [`super::NoBase`] with its reason. Wherever
 //!   no fork point is known, `whole` is `working` — no server asked ([`reach`])
@@ -159,9 +160,8 @@ enum Reach {
     Nothing,
     /// `whole` with no fork point known: the `working` scope, as before this member, no server asked.
     Working,
-    /// The fork point — its URL (the working copy's place below the branch root joined on) and revision — and the
-    /// working copy as `info` read it.
-    Fork { old: String, rev: u64, here: crate::svn::Info },
+    /// The fork point — its URL (the working copy's place below the branch root joined on) and revision.
+    Fork { old: String, rev: u64 },
 }
 
 /// Where `branch` (`branch` true) or `whole` reads from. Only a working copy on a branch copied from somewhere asks the
@@ -182,26 +182,17 @@ fn reach(root: &Path, branch: bool, deadline: &Deadline) -> Result<Reach, Error>
         Some(fork) => {
             let path = [fork.path, on.sub].concat();
             let old = crate::svn::url(&here.repos_root, &path).ok_or(Error::InvalidPath)?;
-            Ok(Reach::Fork { old, rev: fork.rev, here })
+            Ok(Reach::Fork { old, rev: fork.rev })
         }
     }
 }
 
-/// One diff from the fork point: to the working copy's URL at its BASE (`branch` — both sides in the repository, the
-/// working copy never read) or to the working copy itself (`whole`, which `diff` only reads). Read whole; callers cut
-/// the sections they need.
-fn fork_diff(
-    root: &Path,
-    old: &str,
-    rev: u64,
-    new: Option<&crate::svn::Info>,
-    deadline: &Deadline,
-) -> Result<(Vec<u8>, bool), Error> {
-    let mut args = vec![Arg::Flag("--show-copies-as-adds"), Arg::Old(old, rev)];
-    args.push(match new {
-        Some(here) => Arg::NewUrl(&here.url, here.revision),
-        None => Arg::New(""),
-    });
+/// One diff from the fork point: to the working copy's BASE (`branch` — what is committed, node by node, never the
+/// edits: a commit made here counts before any `svn update`) or to the working copy itself (`whole`, which `diff` only
+/// reads). Read whole; callers cut the sections they need.
+fn fork_diff(root: &Path, old: &str, rev: u64, base: bool, deadline: &Deadline) -> Result<(Vec<u8>, bool), Error> {
+    let new = if base { Arg::NewBase("") } else { Arg::New("") };
+    let args = [Arg::Flag("--show-copies-as-adds"), Arg::Old(old, rev), new];
     Ok(crate::svn::run(root, Sub::Diff, &args, PATCH_LIMIT, deadline.left())?)
 }
 
@@ -209,12 +200,12 @@ fn fork_diff(
 /// tracked files come from the diff alone, so a file changed on the branch and again locally is one row.
 fn ranged_changes(root: &Path, branch: bool, budget: Option<Duration>) -> Result<Changes, Error> {
     let deadline = Deadline::of(budget);
-    let (old, rev, here) = match reach(root, branch, &deadline)? {
+    let (old, rev) = match reach(root, branch, &deadline)? {
         Reach::Nothing => return Ok(Changes::default()),
         Reach::Working => return changes_inner(root, deadline.left()),
-        Reach::Fork { old, rev, here } => (old, rev, here),
+        Reach::Fork { old, rev } => (old, rev),
     };
-    let (out, cut) = fork_diff(root, &old, rev, branch.then_some(&here), &deadline)?;
+    let (out, cut) = fork_diff(root, &old, rev, branch, &deadline)?;
     let mut rows = BTreeMap::new();
     diff_rows(&out, cut, &mut rows);
     if !branch {
@@ -241,12 +232,12 @@ fn ranged_patch(
     known: Option<Vec<String>>,
 ) -> Result<Patch, Error> {
     let deadline = Deadline::of(budget);
-    let (old, rev, here) = match reach(root, branch, &deadline)? {
+    let (old, rev) = match reach(root, branch, &deadline)? {
         Reach::Nothing => return Ok(Patch::default()),
         Reach::Working => return patch_inner(root, paths, deadline.left(), known),
-        Reach::Fork { old, rev, here } => (old, rev, here),
+        Reach::Fork { old, rev } => (old, rev),
     };
-    let (data, cut) = fork_diff(root, &old, rev, branch.then_some(&here), &deadline)?;
+    let (data, cut) = fork_diff(root, &old, rev, branch, &deadline)?;
     let mut out = match paths {
         Some(specs) => keep_sections(&data, specs),
         None => data,
@@ -1450,6 +1441,31 @@ mod tests {
         assert_eq!(Backend::Svn.patch(&trunk, &Scope::Whole, None, None).unwrap().text, working_patch);
         assert_eq!(Backend::Svn.changes(&trunk, &Scope::Branch, None).unwrap(), Changes::default());
         assert_eq!((admin_snapshot(&wc), admin_snapshot(&trunk)), (before, trunk_before), ".svn changed");
+    }
+
+    /// **A commit made in the working copy is in `branch` before any `svn update`** — `svn commit` leaves the root's
+    /// revision behind (a mixed-revision working copy), so the new side is each node's BASE, never `<URL>@<root's
+    /// revision>`, which read the branch as empty here. The local edit stays out, and `.svn` is as it was.
+    #[test]
+    fn branch_takes_a_commit_made_here_before_any_update() {
+        if !svn_ready() {
+            return;
+        }
+        let repo = Repo::new("vcs-svn-branch-mixed");
+        let trunk = repo.checkout("trunk", "trunk-wc");
+        commit_files(&trunk, &[("a.txt", "a\n")], "r2 base");
+        repo.branch("x");
+        let wc = repo.checkout("branches/x", "branch-wc");
+        let base = crate::svn::info(&wc, "", None).unwrap().revision;
+        commit_files(&wc, &[("new.txt", "n\n")], "r4 on the branch");
+        assert_eq!(crate::svn::info(&wc, "", None).unwrap().revision, base, "svn commit leaves the root's revision");
+        fs::write(wc.join("a.txt"), "a\nlocal\n").unwrap();
+        let before = admin_snapshot(&wc);
+        let b = Backend::Svn.changes(&wc, &Scope::Branch, None).unwrap();
+        assert_eq!(paths(&b), [("new.txt", Status::Added)], "the commit made here, not the local edit");
+        let p = Backend::Svn.patch(&wc, &Scope::Branch, None, None).unwrap();
+        assert!(p.text.contains("+n\n") && !p.text.contains("+local"), "{}", p.text);
+        assert_eq!(admin_snapshot(&wc), before, ".svn changed");
     }
 
     #[test]

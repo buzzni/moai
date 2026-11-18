@@ -105,11 +105,10 @@ Property-only changes are not part of a diff: such a file is a modified file wit
 
 `moai diff` has no deadline of its own for git. For svn, a read that reaches the 30-second limit without the server answering is reported as `offline`; one that stops while the revision table is still being filled is `timeout`, and the pieces read are kept so the next call goes on from there.
 
-When the server cannot be reached the `commits` scope is still offered, but reading its patch fails with `offline`. `working` needs no server and keeps answering, and so does `whole` on a trunk or a branch that has no known fork point. Once a table has been completed, it answers even when the server is down.
+When the server cannot be reached the `commits` scope is still offered, but reading its patch fails with `offline`. `working` needs no server and keeps answering, and so does `whole` on a trunk or a branch that has no known fork point. When the revision table cannot be read, those scopes still answer, and the reason ends `moai diff`'s stderr line and the diff pane's title. Once a table has been completed, it answers even when the server is down.
 
 ## Known limits
 
-- On a branch, if you commit and do not run `svn update`, the working copy's root `BASE` is still the older revision and `branch` can look empty (mixed revisions). Update, then read again.
 - A diff of a URL against a working copy fails as a whole when a versioned file is missing from disk (`!` in `svn status`), and when the working copy is a subdirectory of a branch that did not exist at the fork point. Both are reported as `failed`, with svn's own words. A list with files left out would be wrong, so none is given.
 - With a `.git` and a `.svn` in the same tree, reading as svn lists `.git/**` as untracked, and reading as git lists `.svn/**`.
 - A branch deleted and made again under the same name keeps the fork point of the first until the cache file is deleted.

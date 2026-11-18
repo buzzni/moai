@@ -12,6 +12,8 @@
 //! - `checked_at`: when the table was last found complete up to HEAD. The server is asked again only [`POLL_SECS`]
 //!   later (a time ahead of now asks at once). **Unset means the first fill never finished** — such a table is never
 //!   answered from, since an id's revisions may sit in the part not read yet
+//! - `tried_at`: when refreshing a complete table last failed (the server out of reach or too slow). The server is
+//!   then asked again only [`POLL_SECS`] later too, so a server that does not answer is not waited on at every read
 //! - `revs`: the revisions whose subject or `Refs:`·`Closes:`·`Fixes:` lines carry an id-shaped word, with the
 //!   subject and those words. Words are read by the rule Git's commit table uses ([`crate::git::words`],
 //!   [`crate::git::trailed`]) and kept when [`crate::git::ids_in`] takes them, whatever project they belong to —
@@ -53,6 +55,11 @@ pub(crate) struct Table {
     pub through: u64,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub checked_at: Option<String>,
+    /// When asking the server to refresh a complete table last failed. The server is not asked again until
+    /// [`POLL_SECS`] after it either — without it, every read of an unreachable server's table waited out its whole
+    /// time before answering from the table. Cleared by a refresh that lands.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub tried_at: Option<String>,
     #[serde(default)]
     pub revs: Vec<Rev>,
     /// moai-0d0s.x27's branch roots, read through [`Table::fork`]. Kept as read otherwise.
@@ -70,6 +77,7 @@ impl Table {
             uuid: uuid.to_owned(),
             through: 0,
             checked_at: None,
+            tried_at: None,
             revs: Vec::new(),
             forks: serde_json::Map::new(),
             extra: serde_json::Map::new(),
@@ -95,7 +103,9 @@ impl Table {
         let table: Table = serde_json::from_slice(bytes).ok()?;
         let sane = table.version == VERSION
             && table.uuid == uuid
-            && table.checked_at.as_deref().is_none_or(|t| crate::model::parse_rfc3339(t).is_some())
+            && [&table.checked_at, &table.tried_at]
+                .iter()
+                .all(|at| at.as_deref().is_none_or(|t| crate::model::parse_rfc3339(t).is_some()))
             && table.revs.windows(2).all(|w| w[0].rev < w[1].rev)
             && table.revs.iter().all(|r| {
                 (1..=table.through).contains(&r.rev)
@@ -105,13 +115,13 @@ impl Table {
         sane.then_some(table)
     }
 
-    /// Whether the server need not be asked now: the table is complete and was checked less than [`POLL_SECS`] ago.
-    /// A check time ahead of `now` (a clock set back) asks at once.
+    /// Whether the server need not be asked now: the table is complete and was checked — or a refresh of it was tried
+    /// and failed — less than [`POLL_SECS`] ago. A time ahead of `now` (a clock set back) asks at once.
     pub(crate) fn fresh(&self, now: i64) -> bool {
-        self.checked_at
-            .as_deref()
-            .and_then(crate::model::parse_rfc3339)
-            .is_some_and(|at| at <= now && now - at < POLL_SECS)
+        let recent = |t: &Option<String>| {
+            t.as_deref().and_then(crate::model::parse_rfc3339).is_some_and(|at| at <= now && now - at < POLL_SECS)
+        };
+        self.complete() && (recent(&self.checked_at) || recent(&self.tried_at))
     }
 
     /// The kept creation of the branch root `key` ([`fork_key`]), or `None` when there is none or it is out of shape —
@@ -289,8 +299,8 @@ pub(crate) enum Fetched {
 }
 
 /// Fills the table from `through + 1` up to `head`, [`CHUNK`]-sized ranges at a time (`chunk` in tests), handing each
-/// filled range to `save`. A range whose output is cut is asked again at half the size; a single revision still cut
-/// is passed over as naming nothing. Done, the table is complete as of `now`. A `head` below `through` (the
+/// filled range to `save`. A range whose output is cut is asked again at half its length; a single revision still cut
+/// is passed over as naming nothing, and the next range is a whole chunk again. Done, the table is complete as of `now`. A `head` below `through` (the
 /// repository was replaced) starts again from r1. A failed `fetch` stops the fill with its error — what was filled is
 /// already saved.
 pub(crate) fn fill(
@@ -306,7 +316,8 @@ pub(crate) fn fill(
         table.revs.clear();
         table.checked_at = None;
     }
-    let mut size = chunk.max(1);
+    let chunk = chunk.max(1);
+    let mut size = chunk;
     while table.through < head {
         let from = table.through + 1;
         let to = head.min(table.through.saturating_add(size));
@@ -318,15 +329,21 @@ pub(crate) fn fill(
                 table.revs.extend(revs);
                 table.through = to;
             }
-            Fetched::Cut if size > 1 => {
-                size /= 2;
+            // Halve the range asked, not the size: a last range shorter than the size would be asked again unchanged.
+            Fetched::Cut if to > from => {
+                // Half the range's length, `to - from + 1`, rounded down.
+                size = (to - from).div_ceil(2);
                 continue;
             }
             Fetched::Cut => table.through = from,
         }
+        // Past the long stretch, whole chunks again — one long message must not leave the rest of the fill a revision
+        // per call.
+        size = chunk;
         save(table);
     }
     table.checked_at = Some(now.to_owned());
+    table.tried_at = None;
     save(table);
     Ok(())
 }
@@ -602,9 +619,16 @@ pub(crate) mod tests {
             }
         };
         fill(&mut t, 6, 4, &at(0), fetch, |_| {}).unwrap();
-        // (1, 2) reads; (3, 4) is cut and halved to (3, 3), still cut and passed over; the size stays one.
-        assert_eq!(*asked.borrow(), [(1, 4), (1, 2), (3, 4), (3, 3), (4, 4), (5, 5), (6, 6)]);
+        // (1, 2) reads and the size is whole again; (3, 6) is cut, halved to (3, 4), then (3, 3), still cut and passed
+        // over; past it a whole chunk is asked, not a revision at a time.
+        assert_eq!(*asked.borrow(), [(1, 4), (1, 2), (3, 6), (3, 4), (3, 3), (4, 6)]);
         assert_eq!(t.through, 6);
+        // A last range shorter than the size is halved itself, never asked again as it was.
+        asked.borrow_mut().clear();
+        let mut t = Table::new(UUID);
+        t.through = 1;
+        fill(&mut t, 3, 8, &at(0), fetch, |_| {}).unwrap();
+        assert_eq!(*asked.borrow(), [(2, 3), (2, 2), (3, 3)]);
     }
 
     #[test]
@@ -615,6 +639,15 @@ pub(crate) mod tests {
         assert!(t.fresh(now(0)) && t.fresh(now(59)));
         assert!(!t.fresh(now(60)) && !t.fresh(now(61)));
         assert!(!t.fresh(now(-5)), "a check time ahead of now asks at once");
+        // A failed refresh holds the next ask off for its minute too — only for a table that can answer meanwhile.
+        t.tried_at = Some(at(100));
+        assert!(t.fresh(now(130)) && !t.fresh(now(160)));
+        let mut never = Table::new(UUID);
+        never.tried_at = Some(at(0));
+        assert!(!never.fresh(now(1)), "a table never completed asks again at once");
+        // A landed refresh clears it.
+        fill(&mut t, 0, 4, &at(200), |_, _| Ok(Fetched::Revs(Vec::new())), |_| {}).unwrap();
+        assert_eq!(t.tried_at, None);
     }
 
     #[test]

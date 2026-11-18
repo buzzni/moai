@@ -67,8 +67,10 @@ pub(crate) enum Arg<'a> {
     Old(&'a str, u64),
     /// `--new=<뿌리 밑 경로>` — URL 대 작업 사본 diff 의 새 쪽.
     New(&'a str),
-    /// `--new=<URL>@<rev>` — URL 대 URL diff 의 새 쪽(moai-0d0s.x27 의 `branch`).
-    NewUrl(&'a str, u64),
+    /// `--new=./<뿌리 밑 경로>@BASE` — 저장소 대 작업 사본 BASE diff 의 새 쪽(moai-0d0s.x27 의 `branch`). 노드마다의 BASE
+    /// 를 읽는다: `svn commit` 은 뿌리의 리비전을 안 올려, `<URL>@<뿌리 리비전>` 은 update 전까지 방금 커밋한 리비전을
+    /// 빠뜨린다(에픽 끝 리뷰 실측, svn 1.14.3). 손댄 것·더한 것·디스크에서 없어진 파일은 안 읽고 `.svn` 도 그대로다.
+    NewBase(&'a str),
     /// 작업 사본 `diff` 의 대상 경로 — `./<경로>`, **끝에 `@` 를 안 붙인다**(moai-0d0s.s6g 실측, svn 1.14.3).
     /// 작업 사본 대상의 `svn diff` 는 peg 를 안 읽는다: `./a@b` 는 그대로 `a@b` 고, `./m.txt@` 는 `@` 까지 이름으로
     /// 읽어 `E155010: The node '…/m.txt@' was not found` 로 죽는다. `-` 로 시작하는 이름은 `./` 가 막는다.
@@ -78,7 +80,7 @@ pub(crate) enum Arg<'a> {
 
 impl Arg<'_> {
     fn reaches_server(&self) -> bool {
-        matches!(self, Arg::Url(..) | Arg::Old(..) | Arg::NewUrl(..))
+        matches!(self, Arg::Url(..) | Arg::Old(..))
     }
 }
 
@@ -148,8 +150,8 @@ pub(crate) fn command(root: &Path, sub: Sub, args: &[Arg]) -> std::process::Comm
             Arg::New(p) => {
                 cmd.arg(format!("--new={}", literal(p)));
             }
-            Arg::NewUrl(u, rev) => {
-                cmd.arg(format!("--new={}", pegged(u, Some(*rev))));
+            Arg::NewBase(p) => {
+                cmd.arg(format!("--new=./{p}@BASE"));
             }
             Arg::Local(p) => {
                 cmd.arg(format!("./{p}"));
@@ -661,11 +663,18 @@ fn table_within(
             let entries = log_entries(&String::from_utf8_lossy(&out));
             Ok(cache::Fetched::Revs(entries.into_iter().filter_map(|(rev, msg)| cache::rev_of(rev, &msg)).collect()))
         };
-        cache::fill(&mut table, head, chunk, now, fetch, save)
+        cache::fill(&mut table, head, chunk, now, fetch, &save)
     })();
     match filled {
         Ok(()) => Ok(table),
-        Err(stop) => cache::settle(&table, stop, left().is_zero()).map(|()| table),
+        Err(stop) => {
+            // A complete table whose refresh failed waits its minute too — else every read waits the server out again.
+            if table.complete() {
+                table.tried_at = Some(now.to_owned());
+                save(&table);
+            }
+            cache::settle(&table, stop, left().is_zero()).map(|()| table)
+        }
     }
 }
 
@@ -1271,6 +1280,12 @@ pub(crate) mod tests {
         // Long past the minute, the server is asked and is gone: the complete table answers.
         let stale = table_within(&wc, None, Some(&cache_dir), &at(3600), 2, SERVER_TIMEOUT).expect("served");
         assert_eq!(stale.commits("moai-ab12"), full.commits("moai-ab12"));
+        // The failed refresh waits its minute too: the file says when it was tried, and inside that minute nothing asks.
+        let uuid = info(&wc, "", None).expect("info").uuid;
+        let kept = cache::read(&cache_dir.join(format!("{uuid}.json")), &uuid);
+        assert_eq!((kept.tried_at.as_deref(), kept.checked_at.as_deref()), (Some(at(3600).as_str()), Some(T0)));
+        let seconds = |s: &str| crate::model::parse_rfc3339(s).unwrap();
+        assert!(kept.fresh(seconds(&at(3630))) && !kept.fresh(seconds(&at(3660))));
         // No table to fall back on: offline, and no panic, no hang.
         let empty = Scratch::new("svn-offline-empty");
         let got = table_within(&wc, None, Some(&empty), T0, 2, SERVER_TIMEOUT);
@@ -1335,10 +1350,10 @@ pub(crate) mod tests {
         }
         // The peg goes on after the whole URL, so a name's `@` is never one.
         let encoded = url("file:///r", &parts(&["x@1"])).unwrap();
-        let args = argv(&command(Path::new("."), Sub::Diff, &[Arg::Old(&encoded, 3), Arg::NewUrl(&encoded, 4)]));
+        let args = argv(&command(Path::new("."), Sub::Diff, &[Arg::Old(&encoded, 3), Arg::NewBase("")]));
         assert!(args.contains(&"--old=file:///r/x%401@3".to_owned()), "{args:?}");
-        assert!(args.contains(&"--new=file:///r/x%401@4".to_owned()), "{args:?}");
-        assert!(reaches_server(Sub::Diff, &[Arg::NewUrl(&encoded, 4)]));
+        assert!(args.contains(&"--new=./@BASE".to_owned()), "{args:?}");
+        assert!(!reaches_server(Sub::Status, &[Arg::NewBase("")]), "BASE is read from the working copy");
         assert_eq!(repo_path("/branches/한 x"), Some(parts(&["branches", "한 x"])));
         for bad in ["", "trunk", "/", "/a//b", "/a/../b", "/./a", "/a/"] {
             assert_eq!(repo_path(bad), None, "{bad:?}");
