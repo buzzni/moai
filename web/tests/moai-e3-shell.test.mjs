@@ -743,3 +743,9 @@ test('shell: leaving Gantt clears its folds while list expansion survives', () =
   assert.ok(panel.$('.g-row[data-id="se-e1.a"]'), 'returning opens every gantt folder')
   panel.shell.destroy()
 })
+
+test('the inner detail+diff split fills the outer detail place, so a short detail does not cut the diff short (moai-5tgg)', async () => {
+  const { readFileSync } = await import('node:fs')
+  const css = readFileSync(new URL('../panel/style/shell.css', import.meta.url), 'utf8')
+  assert.match(css, /\.m-shell \.m-split-detail > \.m-split \{[^}]*height: 100%/)
+})
