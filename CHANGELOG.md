@@ -12,6 +12,8 @@ does not commit and it does not tag — see `CONTRIBUTING.md`.
 
 ## [Unreleased]
 
+## [1.5.0] - 2026-11-18
+
 ### Added
 
 - The explorer's file window and diff pane, the web Files tab and `moai diff <id>` read changes and diffs from a Subversion working copy, in the `working`, `commits`, `branch` and `whole` scopes, through read-only `svn` calls (1.9 or later) and a revision-table cache outside the project. Where a `.git` and a `.svn` are both found, git stays the default; `moai diff --vcs git|svn`, `backend` under `[vcs]` in `.moai/config.toml`, and a pick in `SPC w` or the web Files tab choose the other. `vcs_error.kind` gains `no_svn`, `offline` and `no_base`. See the new `docs/svn.md`. (moai-0d0s)
