@@ -116,6 +116,9 @@
 
 /* ---- Panes: the list and board each scroll on their own, so a tab change keeps each one's offset. ---- */
 .m-shell .m-split-list { display: flex; flex-direction: column; overflow: hidden; }
+/* The detail and the diff share the outer detail place as an inner split (shell.ts). The outer detail is a block, so without a height
+   the inner split sizes to its content and a short detail cuts the diff off short of the place's end (moai-5tgg). */
+.m-shell .m-split-detail > .m-split { height: 100%; }
 .m-pane-main { flex: 1 1 auto; min-height: 0; overflow: auto; }
 .m-pane-main[data-pane="list"]:not([hidden]), .m-pane-main[data-pane="board"]:not([hidden]) { display: flex; flex-direction: column; }
 .m-pane-main[data-pane="list"] > :not(.m-fill), .m-pane-main[data-pane="board"] > :not(.m-fill) { flex: none; }
