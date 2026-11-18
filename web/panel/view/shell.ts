@@ -22,7 +22,7 @@ import { matchKey, toolbarOf, type Focus, type State, type Store, type Tab } fro
 import { button, el, emptyState, icon, iconButton, paintState, stateLabel } from "./components.ts"
 import type { IconName } from "./icons.ts"
 import { mountBrand } from "./brand.ts"
-import { allTips, createTips } from "./tips.ts"
+import { createTips } from "./tips.ts"
 import { mountCrumbs } from "./crumbs.ts"
 import { COLUMN_DROPS, effectivePosition } from "./responsive.ts"
 import { narrow, segKey } from "./list-model.ts"
@@ -350,12 +350,12 @@ export function mountShell(root: HTMLElement, options: ShellOptions): Shell {
 
   // The activity stays on every tab (the wiki reads too), floating over the foot of the panes so a read never pushes
   // them (shell.css, se-24ey.14i).
-  // The TUI's header (view/brand.ts): the logo, then who and which moai (from `/api/boot`, data/about.ts), and a tip
-  // that opens the tips page (view/tips.ts).
+  // The TUI's header (view/brand.ts): the logo, then who and which moai (from `/api/boot`, data/about.ts), and the
+  // projects beside them. The tips page (view/tips.ts) stays mounted; the header no longer opens it.
   // The key router's own reading of the platform, so the page and the keys agree on which Ctrl is the host's.
   const platform = detectPlatform(win?.navigator)
   const tipsPage = createTips(doc, copy.shell.tips, platform)
-  const brand = mountBrand(doc, copy.shell.version, { tips: allTips(copy.shell.tips), label: copy.shell.tips.openAll, open: () => tipsPage.open() }, (entry) => intents.openProject?.(entry))
+  const brand = mountBrand(doc, copy.shell.version, (entry) => intents.openProject?.(entry))
   const shell = el(doc, "div", { class: "m-shell" }, brand.el, tabbar, toolbar, head, body, status, tipsPage.el)
   root.replaceChildren(shell)
 
