@@ -121,6 +121,12 @@ fn path(s: &str, prefix: &str) -> Option<String> {
     let p = unquote(s.split('\t').next().unwrap_or(s));
     if p == "/dev/null" { None } else { Some(p.strip_prefix(prefix).unwrap_or(&p).to_owned()) }
 }
+/// svn writes the path raw (no `a/` prefix, no quotes); a trailing `(nonexistent)` tab field means the side is absent.
+fn svn_path(s: &str) -> Option<String> {
+    let mut fields = s.split('\t');
+    let first = fields.next().unwrap_or(s);
+    if fields.next_back() == Some("(nonexistent)") { None } else { Some(first.to_owned()) }
+}
 fn header_paths(s: &str) -> (Option<String>, Option<String>) {
     if s.starts_with('"') {
         let mut escaped = false;
@@ -172,6 +178,10 @@ pub fn parse(text: &str) -> Vec<FileDiff> {
     let mut file: Option<FileDiff> = None;
     let mut active = false;
     let mut combined = false;
+    // True while the current section began with svn's `Index:` line; git sections never set it.
+    let mut svn = false;
+    // True after `Property changes on:`: the `## ` property hunk that follows is not a text diff.
+    let mut props = false;
     let mut old = 0usize;
     let mut new = 0usize;
     let mut old_left = 0usize;
@@ -186,6 +196,8 @@ pub fn parse(text: &str) -> Vec<FileDiff> {
             file = Some(FileDiff { old_path, new_path, ..FileDiff::default() });
             active = false;
             combined = false;
+            svn = false;
+            props = false;
             continue;
         }
         if let Some(name) = line.strip_prefix("diff --cc ").or_else(|| line.strip_prefix("diff --combined ")) {
@@ -196,6 +208,29 @@ pub fn parse(text: &str) -> Vec<FileDiff> {
             file = Some(FileDiff { old_path: Some(name.clone()), new_path: Some(name), ..FileDiff::default() });
             active = false;
             combined = false;
+            svn = false;
+            props = false;
+            continue;
+        }
+        // A hunk body line never starts with `I`, so this cannot split a git patch.
+        if let Some(name) = line.strip_prefix("Index: ") {
+            if let Some(f) = file.take() {
+                files.push(f);
+            }
+            file = Some(FileDiff {
+                old_path: Some(name.to_owned()),
+                new_path: Some(name.to_owned()),
+                ..FileDiff::default()
+            });
+            active = false;
+            combined = false;
+            svn = true;
+            props = false;
+            continue;
+        }
+        if svn && line.starts_with("Property changes on: ") {
+            active = false;
+            props = true;
             continue;
         }
         if line.starts_with("\\ No newline at end of file") {
@@ -275,6 +310,34 @@ pub fn parse(text: &str) -> Vec<FileDiff> {
             } else {
                 continue;
             }
+        }
+        if svn {
+            if line.len() >= 3 && line.bytes().all(|b| b == b'=') {
+                continue;
+            }
+            if let Some(f) = file.as_mut() {
+                if line == "Cannot display: file marked as a binary type." {
+                    f.binary = true;
+                    continue;
+                }
+                if !props {
+                    if let Some(p) = line.strip_prefix("--- ") {
+                        f.old_path = svn_path(p);
+                        if f.old_path.is_none() {
+                            f.kind = FileKind::Added;
+                        }
+                        continue;
+                    }
+                    if let Some(p) = line.strip_prefix("+++ ") {
+                        f.new_path = svn_path(p);
+                        if f.new_path.is_none() {
+                            f.kind = FileKind::Deleted;
+                        }
+                        continue;
+                    }
+                }
+            }
+            continue;
         }
         if let Some(p) = line.strip_prefix("--- ") {
             if file.as_ref().is_some_and(|f| !f.hunks.is_empty()) {
@@ -400,6 +463,70 @@ mod tests {
         assert_eq!(f[0].hunks[0].lines[0].kind, LineKind::Raw);
         assert_eq!(f[0].hunks[0].lines[1].text, "++new");
         assert_eq!(pair(&f[0].hunks[0]).len(), 2);
+    }
+    const SVN: &str = "Index: a b.txt\n===================================================================\n--- a b.txt\t(revision 2)\n+++ a b.txt\t(working copy)\n@@ -1,3 +1,5 @@\n a\n+d\n-- x\t(revision 3)\n b\n+e\nIndex: logo.png\n===================================================================\nCannot display: file marked as a binary type.\nsvn:mime-type = application/octet-stream\n\nProperty changes on: logo.png\n___________________________________________________________________\nDeleted: svn:mime-type\n## -1 +0,0 ##\n-application/octet-stream\n\\ No newline at end of property\nIndex: new.txt\n===================================================================\n--- new.txt\t(nonexistent)\n+++ new.txt\t(working copy)\n@@ -0,0 +1 @@\n+new\nIndex: 한글/x.txt\n===================================================================\n--- 한글/x.txt\t(.../trunk/x.txt)\t(revision 2)\n+++ 한글/x.txt\t(nonexistent)\n@@ -1 +0,0 @@\n-x\n";
+    #[test]
+    fn svn_sections_split_into_files() {
+        let f = parse(SVN);
+        assert_eq!(f.len(), 4);
+        assert_eq!((f[0].old_path.as_deref(), f[0].new_path.as_deref()), (Some("a b.txt"), Some("a b.txt")));
+        assert_eq!(f[0].hunks.len(), 1);
+        let h = &f[0].hunks[0];
+        assert_eq!((h.old_start, h.old_len, h.new_start, h.new_len), (1, 3, 1, 5));
+        assert_eq!(h.lines.len(), 5);
+        assert_eq!(h.lines[2].text, "- x\t(revision 3)");
+        assert_eq!((h.lines[2].old_no, h.lines[2].new_no), (Some(2), None));
+        assert_eq!(h.lines[4].new_no, Some(4));
+        assert!(f[1].binary && f[1].hunks.is_empty());
+        assert_eq!(f[1].new_path.as_deref(), Some("logo.png"));
+        assert_eq!(f[2].kind, FileKind::Added);
+        assert_eq!(f[2].old_path, None);
+        assert_eq!(f[2].new_path.as_deref(), Some("new.txt"));
+        assert_eq!(f[2].hunks[0].lines.len(), 1);
+        assert_eq!(f[3].kind, FileKind::Deleted);
+        assert_eq!(f[3].old_path.as_deref(), Some("한글/x.txt"));
+        assert_eq!(f[3].new_path, None);
+    }
+    #[test]
+    fn svn_lines_match_the_git_parse_of_the_same_hunk() {
+        let svn =
+            parse("Index: a\n=====\n--- a\t(revision 1)\n+++ a\t(working copy)\n@@ -3,2 +3,3 @@\n x\n-y\n+z\n+w\n");
+        let git = parse("diff --git a/a b/a\n--- a/a\n+++ b/a\n@@ -3,2 +3,3 @@\n x\n-y\n+z\n+w\n");
+        let key = |f: &FileDiff| {
+            f.hunks[0].lines.iter().map(|l| (l.kind, l.old_no, l.new_no, l.text.clone())).collect::<Vec<_>>()
+        };
+        assert_eq!(key(&svn[0]), key(&git[0]));
+    }
+    #[test]
+    fn mixed_commit_svn_and_git_sections_stay_apart() {
+        let t = "commit r12 title\nIndex: a\n=====\n--- a\t(revision 11)\n+++ a\t(revision 12)\n@@ -1 +1 @@\n-o\n+n\ndiff --git a/u b/u\nnew file mode 100644\n--- /dev/null\n+++ b/u\n@@ -0,0 +1 @@\n+u\n";
+        let f = parse(t);
+        assert_eq!(f.len(), 2);
+        assert_eq!(f[0].hunks[0].lines.len(), 2);
+        assert_eq!(f[1].new_path.as_deref(), Some("u"));
+        assert_eq!(f[1].hunks[0].lines.len(), 1);
+    }
+    #[test]
+    fn git_hunks_with_index_looking_lines_are_unchanged() {
+        let f = parse(
+            "diff --git a/x b/x\n--- a/x\t(nonexistent)\n+++ b/x\n@@ -1,3 +1,3 @@\n Index: x\n-Index: x\n+Index: x\n",
+        );
+        assert_eq!(f.len(), 1);
+        assert_eq!(f[0].hunks[0].lines.len(), 3);
+        assert_eq!(f[0].old_path.as_deref(), Some("x"));
+        assert_eq!(f[0].kind, FileKind::Modified);
+    }
+    #[test]
+    fn odd_svn_input_does_not_panic() {
+        for s in [
+            "Index:",
+            "Index: \n",
+            "Index: \n=====\n",
+            "Index: a\n=====\n--- a\t(revision",
+            "Index: a\n+++ \n--- \nProperty changes on: \n",
+        ] {
+            let _ = parse(s);
+        }
     }
     #[test]
     fn odd_input_does_not_panic() {

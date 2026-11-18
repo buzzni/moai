@@ -286,6 +286,7 @@
   "page.table.columns": "第 1~9 列",
   "page.table.helpTitle": "快捷键",
   "page.table.close": "关闭",
+  "page.table.tips": "查看提示",
   "page.wiki.badJson": "无法读取 Wiki 的响应: {reason}",
   "page.wiki.listShape": "Wiki 列表响应的格式不正确。",
   "page.wiki.listNoPages": "Wiki 列表响应中没有 pages。",

@@ -1186,6 +1186,7 @@ Options:
       --scope <SCOPE>        Scope [possible values: commits, branch, working]
       --stat                 Show file statistics instead of the patch
       --path <PATH>          Show only this exact checkout-relative file
+      --vcs <VCS>            Version control [possible values: git, svn]
       --worktree             Also overlay other worktrees (no file changes)
       --json                 Machine-readable output. Every human line goes away
       --no-color             Turn colour off (same as `--color never`)

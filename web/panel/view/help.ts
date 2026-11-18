@@ -26,6 +26,8 @@ export interface HelpProps {
   onClose?: () => void
   /** The words (copy.table); Korean when not given. */
   words?: KeyTableCopy
+  /** One row at the foot of the overlay that opens the tips page (view/tips.ts): the header no longer does. */
+  tips?: { label: string; open: () => void }
 }
 
 export interface HelpView {
@@ -92,9 +94,10 @@ export function createHelp(doc: Document, props: HelpProps): HelpView {
     event.stopPropagation()
     if (event.key === "Escape" || event.key === "Esc") return close()
     if (!inside) return root.focus?.()
-    // Tab: between the overlay itself and its close button, its only control.
-    const closeButton = root.querySelector<HTMLElement>(".m-help-head button")
-    ;(doc.activeElement === closeButton || !closeButton ? root : closeButton).focus?.()
+    // Tab: round the overlay itself and its buttons (the close button, the tips row when there is one).
+    const stops = [root, ...root.querySelectorAll<HTMLElement>("button")]
+    const at = stops.indexOf(doc.activeElement as HTMLElement)
+    stops[(at + 1) % stops.length]!.focus?.()
   }
   root.addEventListener("keydown", (event) => {
     if (event.key === "Escape" || event.key === "Esc") {
@@ -123,6 +126,16 @@ export function createHelp(doc: Document, props: HelpProps): HelpView {
         )
       }
       body.append(list)
+    }
+    const tips = props.tips
+    if (tips) {
+      // Closed first, so the focus goes back to where it was and the tips page takes it from there.
+      const open = el(doc, "button", { type: "button", class: "m-help-tips" }, tips.label)
+      open.addEventListener("click", () => {
+        close()
+        tips.open()
+      })
+      body.append(el(doc, "div", { class: "m-help-row m-help-tips-row" }, open))
     }
     root.replaceChildren(head, body)
     root.hidden = false
