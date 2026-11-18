@@ -739,7 +739,7 @@ pub(crate) fn bounded(
     bounded_command(invocation(root, args), limit, budget)
 }
 
-fn bounded_command(
+pub(crate) fn bounded_command(
     mut command: std::process::Command,
     limit: usize,
     budget: Option<std::time::Duration>,

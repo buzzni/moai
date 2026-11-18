@@ -206,8 +206,18 @@ jobs:
       # 빼야 하는데, 앞은 required check 를 늘리고 뒤는 새 경고가 PR 에서 안 잡힌다.
       # 35초는 그 둘보다 싸다. 밑의 `changes` 로 걷은 것은 이것이 아니라 문서 PR 의
       # LTO 한 판(65~84초, 그 잡의 머리글에 잰 값이 있다)이다.
+      # svn 시험은 진짜 `svn`·`svnadmin` 으로 임시 저장소를 짓는다(moai-0d0s.gst). 러너 이미지에 svn 이
+      # 없어(2026-11-18 확인) 이 잡에서만 깐다 — 맥·윈도 잡은 svn 없이 돌고 그 시험은 한 줄 알리고
+      # 건너뛴다. 여기서는 `MOAI_TEST_SVN=required` 라 svn 을 못 띄우면 건너뛰지 않고 붉어진다 —
+      # 깔기가 조용히 깨진 판이 svn 시험을 안 돌고 초록이 되는 것을 막는다. 잡을 늘리지 않는 까닭은
+      # 이 잡 머리글의 required check 다.
+      - name: svn 을 깐다
+        run: sudo apt-get update && sudo apt-get install -y subversion
+
       - name: test
         run: cargo test --workspace --locked
+        env:
+          MOAI_TEST_SVN: required
 
       # 담는 것은 develop 푸시뿐이고, 담기 전에 이 크레이트의 산출물을 걷는다 — 까닭은 이 잡의 cargo 캐시 자리에 있다.
       - name: 이 크레이트의 산출물을 걷는다
