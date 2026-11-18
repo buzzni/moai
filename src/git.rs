@@ -112,7 +112,7 @@ fn absolute(s: &str) -> bool {
 /// **따옴표로 싼 경로는 닫는 따옴표까지 자른다.** git 은 경로를 대개 `'…'` 로 싸고 그 안에는 공백이
 /// 들 수 있다 — 낱말로만 자르면 `'/Users/John Smith/x'` 의 공백 뒤(`Smith/x`)가 그대로 나간다.
 /// 싸지 않은 경로는 낱말째 자른다.
-fn cut_paths(s: &str) -> String {
+pub(crate) fn cut_paths(s: &str) -> String {
     let mut quoted = String::with_capacity(s.len());
     let mut rest = s;
     while let Some(at) = rest.find(['\'', '"', '`']) {
@@ -664,7 +664,7 @@ pub fn table(root: &Path, ids: &[&str]) -> Result<BTreeMap<String, Vec<Commit>>,
 
 /// 이 커밋이 대는 id 들 — 제목의 낱말과 **트레일러 줄의 낱말**을 같은 자로 본다(moai-dig5).
 /// 한 커밋이 같은 id 를 두 번 적어도 한 번만 든다.
-fn named_in<'a>(subject: &'a str, body: &'a str, known: &std::collections::HashSet<&str>) -> Vec<&'a str> {
+pub(crate) fn named_in<'a>(subject: &'a str, body: &'a str, known: &std::collections::HashSet<&str>) -> Vec<&'a str> {
     let mut named: Vec<&str> = Vec::new();
     for id in words(subject).chain(trailed(body)).filter(|w| known.contains(w)) {
         if !named.contains(&id) {
@@ -739,7 +739,7 @@ pub(crate) fn bounded(
     bounded_command(invocation(root, args), limit, budget)
 }
 
-fn bounded_command(
+pub(crate) fn bounded_command(
     mut command: std::process::Command,
     limit: usize,
     budget: Option<std::time::Duration>,

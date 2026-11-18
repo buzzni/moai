@@ -2555,6 +2555,9 @@ pub struct DiffArgs {
     /// Show only this exact checkout-relative file
     #[arg(long)]
     pub path: Option<String>,
+    /// Version control
+    #[arg(long, value_enum)]
+    pub vcs: Option<DiffVcs>,
     #[command(flatten)]
     pub worktree: WorktreeArg,
 }
@@ -2563,6 +2566,12 @@ pub enum DiffScope {
     Commits,
     Branch,
     Working,
+}
+/// `moai diff --vcs` — where `.git` and `.svn` are both found (moai-0d0s.qg0).
+#[derive(clap::ValueEnum, Debug, Clone, Copy)]
+pub enum DiffVcs {
+    Git,
+    Svn,
 }
 
 #[derive(Args, Debug)]

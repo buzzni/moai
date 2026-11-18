@@ -128,7 +128,9 @@ pub enum Source {
     /// A checkout's whole branch — its fork point to the working tree, untracked files with it — narrowed to one file
     /// when `path` is given (the file window). **A `path` ending in `/` names a directory** (moai-ffk9.211): the pane
     /// then holds every changed file below it — the file window's cursor standing on a folder.
-    Checkout { checkout: Checkout, path: Option<String> },
+    ///
+    /// `vcs` is the file window's own git·svn pick (`SPC w`, moai-0d0s.qg0) — `None` reads as the disk says.
+    Checkout { checkout: Checkout, path: Option<String>, vcs: Option<vcs::Backend> },
     /// An issue's scopes as `moai diff <id>` reads them (the list). `repo` names the project — on the one list each
     /// project is its own repository. The issues are the explorer's, handed over as they are.
     Issue { repo: Repo, issues: Arc<Vec<Issue>>, id: String },
@@ -139,8 +141,13 @@ impl Source {
     /// does not make another subject.
     fn key(&self) -> String {
         match self {
-            Source::Checkout { checkout, path } => {
-                format!("checkout\0{}\0{}", checkout.path.display(), path.as_deref().unwrap_or("\0"))
+            Source::Checkout { checkout, path, vcs } => {
+                let mut key = format!("checkout\0{}\0{}", checkout.path.display(), path.as_deref().unwrap_or("\0"));
+                if let Some(b) = vcs {
+                    key.push('\0');
+                    key.push_str(b.word());
+                }
+                key
             }
             Source::Issue { repo, id, .. } => format!("issue\0{}\0{id}", repo.here().display()),
         }
@@ -171,6 +178,9 @@ struct Want {
 pub struct Failed {
     pub kind: &'static str,
     pub said: String,
+    /// `said` is the whole line, in its backend's words — an svn read's (moai-0d0s.qg0). The pane's own words for
+    /// `no_git`·`not_a_repo`·`timeout` name git, so they are for git reads only.
+    pub worded: bool,
 }
 
 /// One changed file: what the list said of it and its parsed patch, with the colouring once it came.
@@ -232,6 +242,9 @@ pub struct Loaded {
     pub failed: Option<Failed>,
     /// The file asked for is not among the scope's changes.
     pub unchanged: bool,
+    /// An issue's svn working copy has no fork point: the one line that `branch` is not served — the title says it
+    /// (moai-0d0s.qg0).
+    pub notice: Option<String>,
     /// The number column's width — the largest line number of the whole scope, so the text does not shift sideways
     /// between files.
     digits: usize,
@@ -254,8 +267,9 @@ fn no_newline_note(lang: Lang) -> &'static str {
 }
 
 impl Loaded {
+    #[cfg(test)]
     fn failed(kind: &'static str, said: String) -> Loaded {
-        Loaded { failed: Some(Failed { kind, said }), ..Loaded::default() }
+        Loaded { failed: Some(Failed { kind, said, worded: false }), ..Loaded::default() }
     }
 
     /// Lay the rows out and measure — once, on the job thread.
@@ -344,9 +358,15 @@ pub type PaintFn = dyn Fn(&FileDiff) -> Option<Vec<Vec<Vec<highlight::Span>>>> +
 
 /// The read layer's error as the pane says it — `changes::told` itself, for the reads this file makes, so the pane and
 /// `moai diff` never word one failure two ways.
-pub(super) fn told(root: &std::path::Path, lang: Lang, e: vcs::Error) -> Failed {
-    let t = crate::changes::told(root, lang, e);
-    Failed { kind: t.kind, said: t.said }
+pub(super) fn told(root: &std::path::Path, lang: Lang, backend: Option<vcs::Backend>, e: vcs::Error) -> Failed {
+    let t = crate::changes::told(root, lang, backend, e);
+    Failed { kind: t.kind, said: t.said, worded: backend == Some(vcs::Backend::Svn) }
+}
+
+/// The backend a checkout is read with: the window's pick when it is found there, else the disk's default — the one
+/// choice is [`vcs::choose`].
+pub(super) fn reading(root: &std::path::Path, pick: Option<vcs::Backend>) -> Option<vcs::Backend> {
+    vcs::choose(vcs::detected(root), vcs::Asked { screen: pick, ..vcs::Asked::default() })
 }
 
 /// The kind the parser would give a file the list names.
@@ -377,7 +397,7 @@ fn file_of(change: &Change, hunks: Vec<patch::Hunk>) -> FileDiff {
 /// `moai diff` makes, so the two surfaces answer alike.
 pub fn read(source: &Source, scope: Option<Scope>, budget: Option<Duration>, lang: Lang) -> Loaded {
     match source {
-        Source::Checkout { checkout, path } => whole(checkout, path.as_deref(), budget, lang),
+        Source::Checkout { checkout, path, vcs } => whole_with(checkout, path.as_deref(), *vcs, budget, lang),
         Source::Issue { repo, issues, id } => issue(repo, issues, id, scope, budget, lang),
     }
 }
@@ -392,17 +412,18 @@ fn issue(
 ) -> Loaded {
     use crate::changes::RequestError;
     let started = Instant::now();
-    let prepared = crate::changes::offers(repo, issues, id, budget, lang);
+    let prepared = crate::changes::offers(repo, issues, id, budget, lang, None);
     let left = || budget.map(|b| b.saturating_sub(started.elapsed()));
     // A scope chosen by hand can be gone by now (the commit table moved): the first not empty stands instead.
     let answer = match prepared.read(scope, None, false, left()) {
-        Err(RequestError::Scope(_)) => prepared.read(None, None, false, left()),
+        Err(RequestError::Scope(_) | RequestError::NoBranch { .. }) => prepared.read(None, None, false, left()),
         other => other,
     };
     let Ok(answer) = answer else { return Loaded::default() };
     let list_cut = answer.total > answer.files.len();
     let patch_cut = answer.truncated && (!list_cut || answer.patch.len() + CUT_NEAR >= vcs::PATCH_LIMIT);
-    let failed = answer.vcs_error.map(|t| Failed { kind: t.kind, said: t.said });
+    let worded = prepared.backend() == Some(vcs::Backend::Svn);
+    let failed = answer.vcs_error.map(|t| Failed { kind: t.kind, said: t.said, worded });
     let parts = answer
         .files
         .into_iter()
@@ -419,28 +440,41 @@ fn issue(
         list_cut,
         patch_cut,
         failed,
+        notice: answer.notice,
         ..Loaded::default()
     }
+}
+
+/// [`whole_with`] as the disk says — the reads before the window could pick git or svn.
+#[cfg(test)]
+fn whole(checkout: &Checkout, path: Option<&str>, budget: Option<Duration>, lang: Lang) -> Loaded {
+    whole_with(checkout, path, None, budget, lang)
 }
 
 /// A checkout's whole branch, narrowed to `path`. The list is read whole (it names the kind and the counts, and
 /// whether the file changed at all); the patch only for that file or folder — a renamed file by both its names, since
 /// git finds a rename only when both are in the pathspec, and a folder with the other names of the renames that cross
-/// its edge (`vcs::Backend::patch_of`, moai-sgzk).
-fn whole(checkout: &Checkout, path: Option<&str>, budget: Option<Duration>, lang: Lang) -> Loaded {
+/// its edge (`vcs::Backend::patch_of`, moai-sgzk). `pick` is the file window's git·svn pick (moai-0d0s.qg0).
+fn whole_with(
+    checkout: &Checkout,
+    path: Option<&str>,
+    pick: Option<vcs::Backend>,
+    budget: Option<Duration>,
+    lang: Lang,
+) -> Loaded {
     let root = checkout.path.as_path();
     let started = Instant::now();
     let left = || budget.map(|b| b.saturating_sub(started.elapsed()));
-    let Some(backend) = vcs::detect(root) else {
+    let Some(backend) = reading(root, pick) else {
         let e = vcs::Error::Git(crate::git::Error::Failed("not a git repository".into()));
-        let f = told(root, lang, e);
-        return Loaded::failed(f.kind, f.said);
+        let f = told(root, lang, None, e);
+        return Loaded { failed: Some(f), ..Loaded::default() };
     };
     let mut changes = match backend.changes(root, &vcs::Scope::Whole, left()) {
         Ok(c) => c,
         Err(e) => {
-            let f = told(root, lang, e);
-            return Loaded::failed(f.kind, f.said);
+            let f = told(root, lang, Some(backend), e);
+            return Loaded { failed: Some(f), ..Loaded::default() };
         }
     };
     let list_cut = changes.truncated;
@@ -477,8 +511,8 @@ fn whole(checkout: &Checkout, path: Option<&str>, budget: Option<Duration>, lang
     let got = match got {
         Ok(p) => p,
         Err(e) => {
-            let f = told(root, lang, e);
-            return Loaded::failed(f.kind, f.said);
+            let f = told(root, lang, Some(backend), e);
+            return Loaded { failed: Some(f), ..Loaded::default() };
         }
     };
     let mut text = got.text;
@@ -1213,7 +1247,7 @@ pub fn title(v: &View, chosen: Layout, drawn: Layout, lang: Lang) -> String {
         ),
     }
     if let Some(o) = offers.iter().find(|o| Some(o.scope) == at) {
-        if let Some(b) = &o.branch {
+        if let Some(b) = o.branch.as_ref().filter(|b| !b.is_empty()) {
             parts.push(format!("{} {}", style::BRANCH_GLYPH, crate::text::one_line(b)));
         }
         if let Some(owner) = &o.owner {
@@ -1230,6 +1264,9 @@ pub fn title(v: &View, chosen: Layout, drawn: Layout, lang: Lang) -> String {
         } else {
             fill(say(lang, "tui.diff.files"), &[("n", &n)])
         });
+    }
+    if let Some(notice) = v.loaded().and_then(|l| l.notice.as_ref()) {
+        parts.push(notice.clone());
     }
     if chosen == drawn {
         parts.push(drawn.said(lang).to_string());
@@ -1248,6 +1285,9 @@ pub fn said(v: &View, lang: Lang) -> Option<(String, Style)> {
         Shown::Nothing => Some((say(lang, "tui.diff.empty").to_string(), super::draw::dim())),
         Shown::Loaded(l) => {
             if let Some(f) = &l.failed {
+                if f.worded {
+                    return Some((f.said.clone(), warn));
+                }
                 let words = match f.kind {
                     "no_git" => say(lang, "tui.diff.why.no_git").to_string(),
                     "not_a_repo" => say(lang, "tui.diff.why.not_a_repo").to_string(),
@@ -1743,7 +1783,7 @@ mod tests {
             |a: usize, b: usize, c: usize| file_patch("a.rs", a) + &file_patch("b.rs", b) + &file_patch("c.rs", c);
         let patch = Arc::new(Mutex::new(both(3, 20, 4)));
         let mut v = View::with(reading(patch.clone(), Arc::default()), Arc::new(|_| None), EN).clocked(clock);
-        v.show(Some(Source::Checkout { checkout: checkout("/w/a"), path: Some("src/".into()) }));
+        v.show(Some(Source::Checkout { checkout: checkout("/w/a"), path: Some("src/".into()), vcs: None }));
         settle(&mut v);
         v.frame(Layout::Unified, 100, 5);
         // a.rs: head, hunk, 3 lines = rows 0..5; b.rs starts at 5. Stand on b's 4th row.
@@ -1998,6 +2038,31 @@ mod tests {
         assert_eq!(said_of(unchanged).as_deref(), Some(say(EN, "tui.diff.unchanged")));
     }
 
+    /// **An svn read's failure is said in its own words — never the pane's git words** (moai-0d0s.qg0) — and an
+    /// issue's working copy with no fork point says in the title that `branch` is not served.
+    #[test]
+    fn an_svn_failure_keeps_its_words_and_the_title_says_branch_is_not_served() {
+        let said_of = |l: Loaded| said(&shown_with(l), EN).map(|(t, _)| t);
+        for kind in ["timeout", "no_svn", "offline", "failed"] {
+            let failed = Failed { kind, said: "svn timed out".into(), worded: true };
+            let words = said_of(Loaded { failed: Some(failed), ..Loaded::default() });
+            assert_eq!(words.as_deref(), Some("svn timed out"), "{kind}");
+        }
+        // Git's own failure keeps the pane's words.
+        let git = said_of(Loaded::failed("timeout", "Git timed out".into()));
+        assert_eq!(git.as_deref(), Some(say(EN, "tui.diff.why.timeout")));
+        let notice = say(EN, "diff.svn.no_base_convention");
+        let v = shown_with(Loaded { notice: Some(notice.into()), ..loaded(PATCH) });
+        let title = title(&v, Layout::Unified, Layout::Unified, EN);
+        assert!(title.contains(notice), "{title}");
+        let plain = title_of(&shown_with(loaded(PATCH)));
+        assert!(!plain.contains(notice), "{plain}");
+    }
+
+    fn title_of(v: &View) -> String {
+        title(v, Layout::Unified, Layout::Unified, EN)
+    }
+
     /// **`Tab` brings the next file's head to the top, `Shift-Tab` the one before** — in either layout.
     #[test]
     fn tab_jumps_between_file_heads() {
@@ -2020,7 +2085,7 @@ mod tests {
     }
 
     fn source(path: &str) -> Option<Source> {
-        Some(Source::Checkout { checkout: checkout("/w/a"), path: Some(path.into()) })
+        Some(Source::Checkout { checkout: checkout("/w/a"), path: Some(path.into()), vcs: None })
     }
 
     fn settle(v: &mut View) {

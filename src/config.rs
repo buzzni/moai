@@ -521,6 +521,10 @@ pub struct Config {
     /// Repository-only supervisor assignment settings, validated by the message command. The `extra_lines`
     /// entry's `raw` is the TOML value as written — comments and line breaks kept — for [`toml_value`].
     pub supervise: Vec<ModelEntry>,
+    /// `[vcs]` 표 — git 과 svn 이 함께 보이는 체크아웃에서 고를 백엔드(`backend = "git"|"svn"`, moai-0d0s.s6g). 적힌
+    /// 그대로 든다 — 값은 쓰는 자리([`crate::vcs::configured`])가 잰다. 여기서 거절하면 값 오타 하나가 `moai status` 까지
+    /// 세운다(`[models]` 와 같은 까닭). `moai config` 는 이 표를 안 낸다.
+    pub vcs: Vec<ModelEntry>,
 }
 
 /// `.moai/config.toml` 의 `[models]` 한 줄 — **값은 여기서 재지 않는다.** 아는 키인가·등급 낱말인가·큰따옴표 글인가는
@@ -624,6 +628,9 @@ pub const WIKI_KEY: &str = "wiki_dir";
 /// reader cannot spell it apart.
 pub const SESSION_LOST_KEY: &str = "session_lost_minutes";
 
+/// [`Config::vcs`] 의 표 이름.
+pub const VCS_TABLE: &str = "vcs";
+
 /// [`Config::models`] 의 표 이름 — 사용자 설정과 같은 이름이다([`crate::user_config::MODELS`]).
 pub const MODELS_TABLE: &str = crate::user_config::MODELS;
 
@@ -718,6 +725,11 @@ impl Config {
             supervise: es
                 .iter()
                 .filter(|e| e.table == Some("supervise"))
+                .map(|e| ModelEntry { key: e.key.into(), raw: e.value.into(), line: e.line })
+                .collect(),
+            vcs: es
+                .iter()
+                .filter(|e| e.table == Some(VCS_TABLE))
                 .map(|e| ModelEntry { key: e.key.into(), raw: e.value.into(), line: e.line })
                 .collect(),
         })

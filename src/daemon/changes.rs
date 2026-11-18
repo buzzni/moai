@@ -419,11 +419,16 @@ mod tests {
     fn a_row_moved_to_the_archive_is_removed() {
         let (_keep, root) = project("changes-archive");
         let memory = Memory::new();
+        // `ask` 는 이 프로세스 안에서 읽어 진짜 시계를 쓴다(`MOAI_NOW` 는 자식 CLI 에만 선다). 닫은 때를 고정한 날짜로 두면
+        // 오늘이 `archive_days`(14일)를 넘긴 날부터 done 줄이 첫 읽기에서 이미 빠져, 커서가 못 본 줄은 `removed` 가 아니다.
+        // 그래서 닫은 때는 지금이고 아카이브는 그 30일 뒤다 — 오늘이 언제든 같다.
+        let now = crate::model::parse_rfc3339(&crate::model::now()).unwrap();
+        let (closed, later) = (crate::model::format_rfc3339(now), crate::model::format_rfc3339(now + 30 * 86_400));
         let a = add(&root, "2026-11-04T09:01:00Z", "하나");
         add(&root, "2026-11-04T09:01:00Z", "둘");
-        moai(&root, "2026-11-04T09:02:00Z", &["mv", &a, "done"]);
+        moai(&root, &closed, &["mv", &a, "done"]);
         let (cursor, ..) = ask(&memory, &root, None);
-        let out = moai(&root, "2026-12-30T00:00:01Z", &["archive"]);
+        let out = moai(&root, &later, &["archive"]);
         assert!(!root.join(".moai/archive").read_dir().map(|mut d| d.next().is_none()).unwrap_or(true), "{out}");
         let (_, changed, removed, reset) = ask(&memory, &root, Some(&cursor));
         assert_eq!((changed, removed, reset), (vec![], vec![a], false));

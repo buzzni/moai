@@ -144,14 +144,17 @@ fn turn(open: &[&str], after: Option<&str>, limit: usize) -> (Vec<String>, Optio
 }
 
 type ListFn = dyn Fn(&Jail, &str) -> Result<files::Listed, Why> + Send + Sync;
-type IgnoredFn = dyn Fn(&Path) -> Option<Vec<String>> + Send + Sync;
+/// The ignored directories of a checkout, read with the window's git·svn pick (`None`: as the disk says).
+type IgnoredFn = dyn Fn(&Path, Option<vcs::Backend>) -> Option<Vec<String>> + Send + Sync;
 type ReadFn = dyn Fn(&Jail, &str) -> Result<files::Text, Why> + Send + Sync;
 type StampFn = dyn Fn(&Jail, &str) -> Option<files::Stamp> + Send + Sync;
 type PaintFn = dyn Fn(&str, &str) -> Option<Vec<Vec<crate::highlight::Span>>> + Send + Sync;
 type WalkFn =
     dyn Fn(&Jail, &str, &[String], &mut dyn FnMut(&[String]) -> bool) -> Result<files::Walked, Why> + Send + Sync;
 type PlacesFn = dyn Fn(&Path) -> Places + Send + Sync;
-type ChangesFn = dyn Fn(&Checkout, Lang) -> Result<ChangeList, String> + Send + Sync;
+type ChangesFn = dyn Fn(&Checkout, Option<vcs::Backend>, Lang) -> Result<ChangeList, String> + Send + Sync;
+/// Which backends stand over a checkout — read on the places thread, never on the loop (moai-0d0s.qg0).
+type FoundFn = dyn Fn(&Path) -> vcs::Detected + Send + Sync;
 type DiffReadFn = diff::ReadFn;
 
 /// How long the changed-files list may take — git's budget, as the diff pane's ([`diff::BUDGET`]).
@@ -181,13 +184,22 @@ fn places(here: &Path) -> Places {
 /// main checkout has no fork point and gives what is not committed (`vcs::Scope::Whole`). **The marks come with it**
 /// (moai-p7nr.c67): the read layer folds the letters and rolls the directories up, on this thread — the loop only looks
 /// a path up. Marks that cannot be read in the budget leave the directories `M`, never the list unread.
-fn changes(c: &Checkout, lang: Lang) -> Result<ChangeList, String> {
+///
+/// `pick` is the window's git·svn pick (moai-0d0s.qg0); a failure is said in the backend's own words.
+fn changes_with(c: &Checkout, pick: Option<vcs::Backend>, lang: Lang) -> Result<ChangeList, String> {
     let root = c.path.as_path();
-    let Some(git) = vcs::detect(root) else { return Err(say(lang, "tui.diff.why.not_a_repo").to_string()) };
-    let list =
-        git.changes(root, &vcs::Scope::Whole, Some(CHANGES_BUDGET)).map_err(|e| diff::told(root, lang, e).said)?;
+    let Some(git) = diff::reading(root, pick) else { return Err(say(lang, "tui.diff.why.not_a_repo").to_string()) };
+    let list = git
+        .changes(root, &vcs::Scope::Whole, Some(CHANGES_BUDGET))
+        .map_err(|e| diff::told(root, lang, Some(git), e).said)?;
     let marks = git.marks(root, &list, Some(CHANGES_BUDGET));
     Ok(ChangeList { list, marks })
+}
+
+/// [`changes_with`] as the disk says — the list before the window could pick git or svn.
+#[cfg(test)]
+fn changes(c: &Checkout, lang: Lang) -> Result<ChangeList, String> {
+    changes_with(c, None, lang)
 }
 
 /// What the window reads with — the real disk, or a stand-in a test puts in (a slow reader, a failing git).
@@ -203,6 +215,7 @@ pub struct Disk {
     changes: Arc<ChangesFn>,
     diff_read: Arc<DiffReadFn>,
     diff_paint: Arc<diff::PaintFn>,
+    found: Arc<FoundFn>,
     /// What time it is — the refresh's pace and the sweep's measure (moai-ffk9.15v).
     clock: Clock,
 }
@@ -216,9 +229,9 @@ impl Disk {
         let (changes, g) = (self.changes.clone(), gate.clone());
         let (read, h) = (self.diff_read.clone(), gate);
         Disk {
-            changes: Arc::new(move |c: &Checkout, lang: Lang| {
+            changes: Arc::new(move |c: &Checkout, pick: Option<vcs::Backend>, lang: Lang| {
                 let _held = g.lock().unwrap_or_else(std::sync::PoisonError::into_inner);
-                changes(c, lang)
+                changes(c, pick, lang)
             }),
             diff_read: Arc::new(
                 move |s: &diff::Source,
@@ -238,7 +251,9 @@ impl Default for Disk {
     fn default() -> Disk {
         Disk {
             list: Arc::new(files::list),
-            ignored: Arc::new(|root: &Path| crate::vcs::detect(root)?.ignored_dirs(root, Some(IGNORED_BUDGET)).ok()),
+            ignored: Arc::new(|root: &Path, pick: Option<vcs::Backend>| {
+                diff::reading(root, pick)?.ignored_dirs(root, Some(IGNORED_BUDGET)).ok()
+            }),
             read: Arc::new(files::read),
             stamp: Arc::new(files::stamp),
             paint: Arc::new(crate::highlight::lines),
@@ -246,9 +261,10 @@ impl Default for Disk {
                 files::walk(jail, dir, skip, take)
             }),
             places: Arc::new(places),
-            changes: Arc::new(changes),
+            changes: Arc::new(changes_with),
             diff_read: Arc::new(diff::read),
             diff_paint: Arc::new(crate::highlight::diff),
+            found: Arc::new(vcs::detected),
             clock: pace::real(),
         }
     }
@@ -282,9 +298,10 @@ impl Disk {
         };
         Disk {
             list: Arc::new(list),
-            ignored: Arc::new(ignored),
+            ignored: Arc::new(move |root: &Path, _: Option<vcs::Backend>| ignored(root)),
             places: Arc::new(places),
-            changes: Arc::new(|_: &Checkout, _: Lang| Ok(ChangeList::default())),
+            changes: Arc::new(|_: &Checkout, _: Option<vcs::Backend>, _: Lang| Ok(ChangeList::default())),
+            found: Arc::new(|_: &Path| vcs::Detected::default()),
             ..Disk::default()
         }
     }
@@ -313,7 +330,24 @@ impl Disk {
         self,
         changes: impl Fn(&Checkout, Lang) -> Result<ChangeList, String> + Send + Sync + 'static,
     ) -> Disk {
+        Disk { changes: Arc::new(move |c: &Checkout, _: Option<vcs::Backend>, lang: Lang| changes(c, lang)), ..self }
+    }
+
+    /// The same disk with the changed-files list replaced by one that sees the window's git·svn pick.
+    pub(super) fn picking(
+        self,
+        changes: impl Fn(&Checkout, Option<vcs::Backend>) -> vcs::Changes + Send + Sync + 'static,
+    ) -> Disk {
+        let changes = move |c: &Checkout, pick: Option<vcs::Backend>, _: Lang| {
+            let list = changes(c, pick);
+            Ok(ChangeList { marks: vcs::marks(&list, None), list })
+        };
         Disk { changes: Arc::new(changes), ..self }
+    }
+
+    /// The same disk with the backends found over a checkout replaced.
+    pub(super) fn finding(self, found: impl Fn(&Path) -> vcs::Detected + Send + Sync + 'static) -> Disk {
+        Disk { found: Arc::new(found), ..self }
     }
 
     /// The same disk with the diff pane's reader replaced.
@@ -356,7 +390,7 @@ impl Disk {
 
     /// The same disk with the ignored list replaced — a test counts how often it is asked.
     pub(super) fn ignoring(self, ignored: impl Fn(&Path) -> Option<Vec<String>> + Send + Sync + 'static) -> Disk {
-        Disk { ignored: Arc::new(ignored), ..self }
+        Disk { ignored: Arc::new(move |root: &Path, _: Option<vcs::Backend>| ignored(root)), ..self }
     }
 
     /// The same disk with its stamp taker replaced — a test counts the stamps or moves them.
@@ -517,10 +551,11 @@ enum Reply {
         truncated: bool,
         failed: Option<Trouble>,
     },
-    /// The checkouts to pick from (moai-ffk9.211).
+    /// The checkouts to pick from (moai-ffk9.211), and the backends found over each (moai-0d0s.qg0).
     Places {
         id: u64,
         places: Places,
+        found: Vec<(std::path::PathBuf, vcs::Detected)>,
     },
     /// The checkout's changed files (moai-ffk9.211), and how long git took (moai-ffk9.15v).
     Changes {
@@ -717,6 +752,8 @@ struct Worker {
     outgoing: Sender<Reply>,
     disk: Disk,
     checkout: Checkout,
+    /// The window's git·svn pick, read with by every thread of this worker (moai-0d0s.qg0).
+    pick: Option<vcs::Backend>,
     /// One-off reads — the checkout list, the changed files — each on a thread of its own, reaped as they end.
     probes: Vec<std::thread::JoinHandle<()>>,
 }
@@ -774,7 +811,7 @@ fn spreads_into(e: &Entry) -> bool {
 }
 
 impl Worker {
-    fn start(checkout: &Checkout, disk: &Disk) -> Worker {
+    fn start(checkout: &Checkout, disk: &Disk, pick: Option<vcs::Backend>) -> Worker {
         let (requests, incoming) = mpsc::channel::<Request>();
         let (outgoing, replies) = mpsc::channel();
         let walking = outgoing.clone();
@@ -890,7 +927,7 @@ impl Worker {
         let ask = disk.ignored.clone();
         let root = checkout.path.clone();
         let ignored = std::thread::spawn(move || {
-            let _ = told.send(ask(&root));
+            let _ = told.send(ask(&root, pick));
         });
         Worker {
             requests,
@@ -904,6 +941,7 @@ impl Worker {
             outgoing: walking,
             disk: disk.clone(),
             checkout: checkout.clone(),
+            pick,
             probes: Vec::new(),
         }
     }
@@ -911,18 +949,21 @@ impl Worker {
     /// Read the checkouts to pick from, for the window opened at `here`.
     fn places(&mut self, id: u64, here: std::path::PathBuf) {
         let (read, out) = (self.disk.places.clone(), self.outgoing.clone());
+        let find = self.disk.found.clone();
         self.probes.push(std::thread::spawn(move || {
-            let _ = out.send(Reply::Places { id, places: read(&here) });
+            let places = read(&here);
+            let found = places.checkouts.iter().map(|c| (c.path.clone(), find(&c.path))).collect();
+            let _ = out.send(Reply::Places { id, places, found });
         }));
     }
 
     /// List the checkout's changed files.
     fn changes(&mut self, id: u64, lang: Lang) {
         let (read, out, at) = (self.disk.changes.clone(), self.outgoing.clone(), self.checkout.clone());
-        let clock = self.disk.clock.clone();
+        let (clock, pick) = (self.disk.clock.clone(), self.pick);
         self.probes.push(std::thread::spawn(move || {
             let began = clock();
-            let got = read(&at, lang);
+            let got = read(&at, pick, lang);
             let took = clock().saturating_duration_since(began);
             let _ = out.send(Reply::Changes { id, got, took });
         }));
@@ -945,14 +986,14 @@ impl Worker {
         }
         let stop = Arc::new(AtomicBool::new(false));
         self.stop = Some(stop.clone());
-        let (disk, at, out) = (self.disk.clone(), self.checkout.clone(), self.outgoing.clone());
+        let (disk, at, out, pick) = (self.disk.clone(), self.checkout.clone(), self.outgoing.clone(), self.pick);
         self.walker = Some(std::thread::spawn(move || {
             let Some(jail) = Jail::of(&at) else {
                 let failed = Some(Trouble::Missing);
                 let _ = out.send(Reply::WalkDone { id, seen: 0, truncated: false, failed });
                 return;
             };
-            let skip = (disk.ignored)(&at.path);
+            let skip = (disk.ignored)(&at.path, pick);
             if stop.load(Atomic::Relaxed) || out.send(Reply::Ignoring { id, known: skip.is_some() }).is_err() {
                 return;
             }
@@ -1423,6 +1464,11 @@ pub struct Window {
     places_id: u64,
     /// The checkout picker, while open.
     pub pick: Option<Pick>,
+    /// The window's git·svn pick (`SPC w`, moai-0d0s.qg0) — `[vcs] backend` as the window opened, the person's pick
+    /// after. **The window's own**: no other window, no list's diff pane and no config sees it.
+    pub vcs: Option<vcs::Backend>,
+    /// The backends found over each checkout of the list — read with it, on its thread.
+    found: Vec<(std::path::PathBuf, vcs::Detected)>,
     changed: Changed,
     /// The right pane's detail and diff (`SPC v d`·`SPC v D` over the window). **The window's own**: the list's
     /// detail and diff settings are not touched, nothing is kept in the config, and closing the window forgets them.
@@ -1469,9 +1515,10 @@ impl Window {
         disk: &Disk,
         seat: Seat,
         lang: Lang,
+        vcs: Option<vcs::Backend>,
     ) -> Window {
         let disk = &disk.gated();
-        let worker = Shared(Arc::new(Mutex::new(Worker::start(&checkout, disk))));
+        let worker = Shared(Arc::new(Mutex::new(Worker::start(&checkout, disk, vcs))));
         let opened_at = checkout.path.clone();
         let diff = diff::View::with(disk.diff_read.clone(), disk.diff_paint.clone(), lang).clocked(disk.clock.clone());
         let now = (disk.clock)();
@@ -1503,6 +1550,8 @@ impl Window {
             places: None,
             places_id: 0,
             pick: None,
+            vcs,
+            found: Vec::new(),
             changed: Changed {
                 on: false,
                 list: Listing::Reading,
@@ -2025,7 +2074,11 @@ impl Window {
             Some(Row::Entry { path, .. }) => Some(path.clone()),
             _ => None,
         };
-        let source = path.map(|path| diff::Source::Checkout { checkout: self.checkout.clone(), path: Some(path) });
+        let source = path.map(|path| diff::Source::Checkout {
+            checkout: self.checkout.clone(),
+            path: Some(path),
+            vcs: self.vcs,
+        });
         self.diff.show(source);
     }
 
@@ -2211,23 +2264,56 @@ impl Window {
         self.places.as_ref()?.checkouts.iter().position(|c| c.path == self.checkout.path)
     }
 
+    /// The backends found over the checkout the window stands on — none until the list came.
+    pub fn found(&self) -> vcs::Detected {
+        self.found.iter().find(|(p, _)| *p == self.checkout.path).map(|(_, d)| *d).unwrap_or_default()
+    }
+
+    /// The picker's git·svn rows after the checkouts (moai-0d0s.qg0) — only where both stand over the checkout, so a
+    /// checkout of one backend has the picker it had.
+    pub fn vcs_rows(&self) -> &'static [vcs::Backend] {
+        let found = self.found();
+        if found.git && found.svn { &[vcs::Backend::Git, vcs::Backend::Svn] } else { &[] }
+    }
+
+    /// The backend the window reads with now — the one choice ([`vcs::choose`]) over what is found and its pick.
+    pub fn reading_with(&self) -> Option<vcs::Backend> {
+        vcs::choose(self.found(), vcs::Asked { screen: self.vcs, ..vcs::Asked::default() })
+    }
+
     /// A key on the picker: the moves, `Enter` picks, `Esc` closes. Everything else is quiet.
     fn pick_key(&mut self, act: Option<keys::Files>) {
         use keys::Files as F;
-        let n = self.places.as_ref().map_or(0, |p| p.checkouts.len());
+        let checkouts = self.places.as_ref().map_or(0, |p| p.checkouts.len());
+        let rows = self.vcs_rows();
+        let n = checkouts + rows.len();
         let Some(p) = self.pick.as_mut() else { return };
         match act {
             Some(F::Step(m)) => p.cursor = scroll::cursor(m, p.cursor, || n),
             Some(F::Enter) => {
-                let to = self.places.as_ref().and_then(|l| l.checkouts.get(p.cursor)).cloned();
+                let at = p.cursor;
+                let to = self.places.as_ref().and_then(|l| l.checkouts.get(at)).cloned();
                 self.pick = None;
                 if let Some(to) = to {
                     self.switch(to);
+                } else if let Some(b) = at.checked_sub(checkouts).and_then(|i| rows.get(i)) {
+                    self.read_with(*b);
                 }
             }
             Some(F::Close) => self.pick = None,
             _ => {}
         }
+    }
+
+    /// Read the checkout with git or svn from now on — the window's alone. As a switch does, everything read goes and
+    /// a new worker reads the list, the marks, the diff and the ignored folders again.
+    pub fn read_with(&mut self, backend: vcs::Backend) {
+        if self.reading_with() == Some(backend) {
+            return;
+        }
+        self.vcs = Some(backend);
+        let at = self.checkout.clone();
+        self.restart(at);
     }
 
     /// Stand on another checkout. **Everything of the one before goes**: the tree, the cursor, the search and its
@@ -2239,7 +2325,12 @@ impl Window {
             self.checkout = to;
             return;
         }
-        self.worker = Shared(Arc::new(Mutex::new(Worker::start(&to, &self.disk))));
+        self.restart(to);
+    }
+
+    /// Stand on `to` with a new worker, reading with the window's pick — the work of [`Window::switch`].
+    fn restart(&mut self, to: Checkout) {
+        self.worker = Shared(Arc::new(Mutex::new(Worker::start(&to, &self.disk, self.vcs))));
         self.checkout = to;
         self.dirs.clear();
         self.here = ".".into();
@@ -2384,9 +2475,10 @@ impl Window {
                         }
                     }
                 }
-                Reply::Places { id, places } => {
+                Reply::Places { id, places, found } => {
                     if id == self.places_id {
                         self.places_id = 0;
+                        self.found = found;
                         // The checkout standing takes its key, branch and kind from the list: a picked one is a row of
                         // it already; the one the window opened on was found by the thread, its path compared resolved.
                         let standing = places.checkouts.iter().find(|c| c.path == self.checkout.path).or_else(|| {
@@ -3012,7 +3104,10 @@ impl App {
         // The key, the branch and whether it is the main checkout come with the checkout list, read on a thread
         // (moai-ffk9.211) — finding them reads git's files, and the loop does not read.
         let checkout = Checkout { key: ".".into(), path, branch: String::new(), main: true, milestone: None };
-        let w = Window::new(project, checkout, self.keys, &self.files_disk, seat, lang);
+        // The window opens reading as `[vcs] backend` says; `SPC w` changes it for this window alone (moai-0d0s.qg0).
+        let configured =
+            self.site_of_seat(seat).and_then(|s| s.repo.as_ref()).and_then(|r| vcs::configured(&r.config.vcs).backend);
+        let w = Window::new(project, checkout, self.keys, &self.files_disk, seat, lang, configured);
         self.mode = Mode::Files(Box::new(w));
     }
 
@@ -4685,6 +4780,93 @@ mod tests {
         }
         a.hit("Enter");
         settle(a);
+    }
+
+    /// **`SPC w` offers git·svn only over a checkout both stand over, and the pick is the window's alone**
+    /// (moai-0d0s.qg0): a checkout of one backend has the picker it had; picking svn reads the list again with svn; the
+    /// next window opens as the config says.
+    #[test]
+    fn spc_w_offers_git_and_svn_only_where_both_stand_and_the_pick_is_the_windows() {
+        let list = |_: &Checkout, pick: Option<vcs::Backend>| {
+            let name = if pick == Some(vcs::Backend::Svn) { "svn.txt" } else { "git.txt" };
+            vcs::Changes { files: vec![change(name, vcs::Status::Modified)], total: 1, truncated: false }
+        };
+        // One backend: no git·svn rows, and the drawn picker does not name them.
+        let (_one, mut a) = files_app("vcs-one");
+        let disk = std::mem::take(&mut a.files_disk);
+        a.files_disk = disk.finding(|_| vcs::Detected { git: true, svn: false }).picking(list);
+        a.hit("SPC g f");
+        settle(&mut a);
+        a.hit("SPC w");
+        settle(&mut a);
+        assert!(window(&a).vcs_rows().is_empty());
+        let screen = draw::tests::render(&mut a, 140, 24).join("\n");
+        assert!(!screen.contains("버전 관리"), "{screen}");
+        a.hit("Esc");
+        // Both: two rows, git read now, and picking svn reads the list again with it.
+        let (_both, mut a) = files_app("vcs-both");
+        let disk = std::mem::take(&mut a.files_disk);
+        a.files_disk = disk.finding(|_| vcs::Detected { git: true, svn: true }).picking(list);
+        a.hit("SPC g f");
+        settle(&mut a);
+        a.hit("SPC v c Esc");
+        settle(&mut a);
+        assert_eq!(names(&a), ["git.txt"]);
+        a.hit("SPC w");
+        settle(&mut a);
+        assert_eq!(window(&a).vcs_rows(), [vcs::Backend::Git, vcs::Backend::Svn]);
+        let screen = draw::tests::render(&mut a, 140, 24).join("\n");
+        let row = |word: &str| screen.lines().find(|l| l.contains("버전 관리") && l.contains(word)).map(str::to_owned);
+        assert!(row("git").is_some_and(|l| l.contains("[지금]")), "{screen}");
+        assert!(row("svn").is_some_and(|l| !l.contains("[지금]")), "{screen}");
+        a.hit("Esc");
+        pick(&mut a, 2);
+        assert_eq!(window(&a).vcs, Some(vcs::Backend::Svn));
+        assert_eq!(window(&a).reading_with(), Some(vcs::Backend::Svn));
+        assert_eq!(names(&a), ["svn.txt"], "the list was not read again with svn");
+        // The diff pane's read carries the window's pick.
+        let source = diff::Source::Checkout { checkout: window(&a).checkout.clone(), path: None, vcs: window(&a).vcs };
+        assert!(format!("{source:?}").ends_with(" svn"), "{source:?}");
+        // Another window starts again from the config — nothing was kept.
+        a.hit("Esc");
+        a.hit("SPC g f");
+        settle(&mut a);
+        assert_eq!(window(&a).vcs, None);
+        a.hit("SPC v c Esc");
+        settle(&mut a);
+        assert_eq!(names(&a), ["git.txt"]);
+    }
+
+    /// **The real list of an svn working copy, in svn's words** (moai-0d0s.qg0): the trunk and a working copy of no
+    /// convention both mark the edited file — `whole` falls back to `working` where no fork point is known — and a
+    /// working copy svn cannot read fails without "git" and without the pane's git words.
+    #[test]
+    fn an_svn_working_copy_lists_its_changes_in_svn_words() {
+        if !crate::svn::tests::svn_ready() {
+            return;
+        }
+        let repo = crate::svn::tests::Repo::new("tui-files-svn");
+        let trunk = repo.checkout("trunk", "trunk");
+        crate::svn::tests::commit_files(&trunk, &[("a.txt", "a\n")], "base");
+        std::fs::write(trunk.join("a.txt"), "a\nb\n").unwrap();
+        let loose = repo.checkout("", "loose");
+        std::fs::write(loose.join("trunk/a.txt"), "a\nc\n").unwrap();
+        for (wc, path) in [(&trunk, "a.txt"), (&loose, "trunk/a.txt")] {
+            let c = Checkout { key: ".".into(), path: wc.clone(), branch: String::new(), main: true, milestone: None };
+            let got = changes(&c, crate::i18n::Lang::Ko).unwrap_or_else(|e| panic!("{}: {e}", wc.display()));
+            assert_eq!(
+                got.list.files.iter().map(|f| (f.path.as_str(), f.status)).collect::<Vec<_>>(),
+                [(path, vcs::Status::Modified)]
+            );
+            assert_eq!(got.marks.files.get(path), Some(&vcs::Mark::Modified), "{}", wc.display());
+        }
+        // `.svn` with nothing in it: svn fails, and says so as svn.
+        let broken = repo.scratch.join("broken");
+        std::fs::create_dir_all(broken.join(".svn")).unwrap();
+        let c = Checkout { key: ".".into(), path: broken.clone(), branch: String::new(), main: true, milestone: None };
+        let said = changes(&c, crate::i18n::Lang::En).expect_err("an empty .svn read as a working copy");
+        assert!(!said.to_lowercase().contains("git"), "{said}");
+        assert!(said.starts_with("svn failed"), "{said}");
     }
 
     /// **The picker lists what git lists, the main checkout first and the milestone worktree with its word**; picking
