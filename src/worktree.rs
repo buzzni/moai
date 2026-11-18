@@ -1572,6 +1572,59 @@ fn git(root: &Path, args: &[&str]) -> Result<String, Trouble> {
     })
 }
 
+/// All existing checkouts, including milestone worktrees. This reads Git's
+/// administrative files through `on_disk`; it does not start a Git process.
+pub fn checkouts(root: &Path) -> Vec<crate::report::changes::Checkout> {
+    let Some(disk) = on_disk(root) else {
+        return if root.is_dir() {
+            vec![crate::report::changes::Checkout {
+                key: ".".into(),
+                path: real(root),
+                branch: String::new(),
+                main: true,
+                milestone: None,
+            }]
+        } else {
+            Vec::new()
+        };
+    };
+    // The common directory may itself be a bare repository named `.git`.
+    // Its config is the only local indication available without invoking Git.
+    let bare = std::fs::read_to_string(disk.common.join("config")).ok().is_some_and(|text| {
+        let mut core = false;
+        let mut bare = false;
+        for line in text.lines() {
+            let line = line.trim();
+            if line.starts_with('[') {
+                core = line.eq_ignore_ascii_case("[core]");
+            } else if core
+                && let Some((key, value)) = line.split_once('=')
+                && key.trim().eq_ignore_ascii_case("bare")
+            {
+                bare = matches!(value.trim().to_ascii_lowercase().as_str(), "true" | "yes" | "on" | "1");
+            }
+        }
+        bare
+    });
+    // Keys are joined with `workplaces` paths, so they are measured from the same `main_top`
+    // even when that main is the bare directory's parent and is itself left out.
+    let top = main_top(&disk);
+    disk.all
+        .iter()
+        .filter(|(tree, linked, _)| (*linked || !bare) && root_in(&disk, tree).is_dir())
+        .map(|(tree, linked, _)| {
+            let key = from_top(&top, &tree.path).to_string_lossy().into_owned();
+            crate::report::changes::Checkout {
+                key,
+                path: root_in(&disk, tree),
+                branch: tree.label.clone(),
+                main: !linked,
+                milestone: tree.label.strip_prefix(MILESTONE_BRANCH).filter(|id| !id.is_empty()).map(str::to_owned),
+            }
+        })
+        .collect()
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -2662,5 +2715,56 @@ mod tests {
         assert_eq!(origin.unreadable([Some("m-0002")].into_iter()), [Some("m-0002")]);
         assert_eq!(origin.unreadable([Some("m-0001"), Some("m-0001")].into_iter()), [None, Some("m-0001")]);
         assert_eq!(origin.unreadable([None, Some("m-0009")].into_iter()), [None, Some("m-0009")]);
+    }
+}
+
+#[cfg(test)]
+mod checkout_tests {
+    use super::*;
+    #[test]
+    fn bare_repository_has_no_fake_main_and_non_git_project_has_a_root() {
+        let temp = crate::scratch::Scratch::new("checkout-bare");
+        let root: &Path = &temp;
+        assert!(checkouts(root)[0].main);
+        let source = root.join("source");
+        std::fs::create_dir(&source).unwrap();
+        let git = |dir: &Path, args: &[&str]| crate::git::tests::run_git(dir, None, args);
+        git(&source, &["init", "-q"]);
+        git(&source, &["commit", "--allow-empty", "-qm", "base"]);
+        let bare = root.join("bare").join(".git");
+        std::fs::create_dir(bare.parent().unwrap()).unwrap();
+        git(root, &["clone", "--bare", "-q", source.to_str().unwrap(), bare.to_str().unwrap()]);
+        let side = root.join("side");
+        git(root, &["--git-dir", bare.to_str().unwrap(), "worktree", "add", "-qb", "feature", side.to_str().unwrap()]);
+        let got = checkouts(&side);
+        assert_eq!(got.len(), 1);
+        assert!(!got[0].main);
+        // The scope chooser joins these keys with `workplaces` paths.
+        let places = workplaces(&side, true);
+        assert_eq!(places.len(), 1);
+        assert_eq!(places[0].path.to_string_lossy(), got[0].key);
+    }
+    #[test]
+    fn checkout_list_includes_main_and_milestone_and_skips_missing() {
+        let temp = crate::scratch::Scratch::new("checkout-list");
+        let root: &Path = &temp;
+        let git = |args: &[&str]| crate::git::tests::run_git(root, None, args);
+        git(&["init", "-q"]);
+        git(&["commit", "--allow-empty", "-qm", "base"]);
+        let milestone = temp.join("ms");
+        let feature = temp.join("ft");
+        git(&["worktree", "add", "-qb", "milestone/moai-mmmm", milestone.to_str().unwrap()]);
+        git(&["worktree", "add", "-qb", "worktree-moai-aaaa", feature.to_str().unwrap()]);
+        let all = checkouts(root);
+        assert_eq!(all.len(), 3);
+        assert!(all[0].main);
+        assert_eq!(all[0].key, ".");
+        assert!(all.iter().any(|c| c.milestone.as_deref() == Some("moai-mmmm")));
+        assert_eq!(
+            checkouts(&feature).iter().map(|c| &c.key).collect::<Vec<_>>(),
+            all.iter().map(|c| &c.key).collect::<Vec<_>>()
+        );
+        std::fs::rename(&feature, temp.join("gone")).unwrap();
+        assert_eq!(checkouts(root).len(), 2);
     }
 }

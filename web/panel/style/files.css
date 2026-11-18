@@ -1,0 +1,66 @@
+.m-pane-files { min-height: 0; height: 100%; }
+/* The toolbar (40px) stands over the split; :not([hidden]) so the flex does not undo .m-tabpanel[hidden]. */
+.m-pane-files:not([hidden]) { display: flex; flex-direction: column; }
+.m-pane-files > .m-split { flex: 1 1 0; min-height: 0; height: auto; }
+.m-pane-files > .m-split > .m-split-list { display: flex; flex-direction: column; overflow: hidden; }
+.m-files-tree, .m-files-content { height: 100%; overflow: auto; }
+.m-pane-files > .m-split > .m-split-list > .m-files-tree { flex: 1 1 0; min-height: 0; height: auto; }
+/* A tree row is the list's row (components.css .m-row) at the list's height and selection band, drawn from the same
+   tokens: --moai-row-h (tokens.css, as list.css) and --accent. The row stays a button; its fold is a span, so nothing nests. */
+.m-files-row { width: 100%; border: 0; text-align: left; font: inherit; background: transparent; }
+.m-files-tree > .m-row { height: var(--moai-row-h); }
+.m-files-tree > .m-row[aria-selected="true"]::before { width: 4px; background: var(--accent); border-radius: 0 2px 2px 0; }
+.m-files-row:disabled { opacity: .5; }
+.m-files-tree > .m-row > .m-files-name { align-self: stretch; line-height: var(--moai-row-h); }
+/* Always there, empty or not, so the names start in one column; the letter's colour is a .m-mark-* class. */
+.m-files-c-mark { flex: none; width: 1.5ch; text-align: center; font: 600 12px var(--mono); color: var(--muted); }
+.m-files-fold { display: inline-flex; align-items: center; justify-content: center; flex: none; width: 16px; height: 16px; vertical-align: middle; }
+.m-files-fold.moai-toggle { pointer-events: none; }
+.m-files-row[aria-expanded="true"] .moai-toggle .m-icon { transform: rotate(90deg); }
+.m-files-gone { color: var(--muted); text-decoration: line-through; }
+.m-files-from, .m-files-faint { opacity: .6; }
+.m-files-content { font: 12px/20px var(--mono); }
+.m-file-line { display: flex; min-width: max-content; white-space: pre; }
+.m-file-number { position: sticky; left: 0; min-width: 4ch; text-align: right; padding-right: 1ch; background: var(--bg); color: var(--muted); }
+.m-syntax-comment { color: var(--ok); } .m-syntax-string { color: var(--warn); } .m-syntax-keyword { color: var(--accent); } .m-syntax-number { color: var(--muted); }
+.m-pane-files { container: files / inline-size; }
+@container files (max-width: 639px) {
+  .m-split-detail, .m-split-resizer { display: none; }
+  .m-files-show-content .m-split-list { display: none; }
+  .m-files-show-content .m-split-detail { display: block; }
+}
+.m-files-kind-directory { color: var(--accent); font-weight: bold; }
+.m-files-kind-link { color: var(--branch); }
+.m-files-kind-source { color: var(--file-source); }
+.m-files-kind-doc { color: var(--review); }
+.m-files-kind-data { color: var(--ok); }
+.m-files-kind-script { color: var(--file-script); }
+.m-files-kind-binary { color: var(--muted); }
+.m-files-kind-plain { color: var(--text); }
+/* Status letters (changed files, diff headers) and the +n / −n counts; shared with diff.css, which is bundled with this sheet. */
+.m-mark-M { color: var(--warn); } .m-mark-A { color: var(--ok); } .m-mark-D { color: var(--danger); } .m-mark-R { color: var(--branch); }
+.m-count-add { color: var(--ok); } .m-count-del { color: var(--danger); }
+/* Toolbar: 40px, a soft rule under it: checkout select · always-visible search · separator · icon toggles. */
+.m-files-toolbar { display: flex; align-items: center; gap: 8px; box-sizing: border-box; height: 40px; flex: none; padding: 0 8px; border-bottom: 1px solid var(--border-soft); }
+.m-files-field { position: relative; display: inline-flex; align-items: center; min-width: 0; }
+.m-files-field > .m-icon { position: absolute; left: 8px; width: 14px; height: 14px; color: var(--muted); pointer-events: none; }
+.m-files-checkout { flex: 0 1 auto; max-width: 45%; }
+.m-files-find { flex: 1 1 120px; max-width: 280px; }
+.m-files-field select, .m-files-field input { box-sizing: border-box; width: 100%; min-width: 0; height: 28px; padding: 0 8px 0 28px; border: 1px solid var(--border); border-radius: 6px; background: var(--bg); color: var(--text); font: 12px var(--mono); }
+.m-files-field select { text-overflow: ellipsis; }
+.m-files-field input::placeholder { color: var(--muted); font-family: var(--font); }
+.m-files-field select:focus-visible, .m-files-field input:focus-visible { outline: 2px solid var(--accent); outline-offset: -1px; }
+.m-files-sep { flex: none; width: 1px; height: 16px; background: var(--border); }
+/* One line of faint ink: a read failure, a cut, the number of matches. Gone when empty. */
+.m-files-message { padding: 4px 12px; font-size: 12px; color: var(--muted); }
+.m-files-message:empty { display: none; }
+/* The pane head (diff.css's too): 32px, 12px faint text, only the name bold. */
+.m-panehead { display: flex; align-items: center; gap: 8px; box-sizing: border-box; height: 32px; flex: none; padding: 0 8px 0 12px; border-bottom: 1px solid var(--border-soft); font-size: 12px; color: var(--muted); white-space: nowrap; overflow: hidden; }
+.m-panehead b { color: var(--text); font-weight: 600; overflow: hidden; text-overflow: ellipsis; }
+.m-panehead-sp { flex: 1; }
+.m-files-right, .m-files-issue { min-height: 0; height: 100%; overflow: auto; }
+.m-files-right { display: flex; flex-direction: column; overflow: hidden; }
+.m-files-right > :not(.m-panehead, .m-files-collapsed) { flex: 1 1 0; min-height: 0; height: auto; }
+.m-files-right > .m-files-content, .m-files-right > .m-files-issue { overflow: auto; }
+.m-files-collapsed { margin: 0; padding: 8px 12px; font-size: 12px; color: var(--muted); }
+.m-files-right > .m-split { height: 100%; }

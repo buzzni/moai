@@ -42,8 +42,8 @@ These commands act on the selected open window. Use `-t <id>` to choose one expl
 | `group` | `moai ctl group assignee` | Group the list and board by a field; `structure` restores the tree and `none` makes a flat list. |
 | `filter` | `moai ctl filter 'status=todo tag=parser'` | Apply a filter; `--clear` removes it. |
 | `find` | `moai ctl find 'parser' --in title` | Search `all`, `id`, `title`, `tag`, `body`, or `note`. |
-| `screen` | `moai ctl screen board` | Open `list`, `board`, `gantt`, `stats`, or `wiki`. |
-| `view` | `moai ctl view deferred on` | Set `deferred`, `backlog`, `archived`, `worktree`, `raw`, or `column:<name>` on or off. |
+| `screen` | `moai ctl screen board` | Open `list`, `board`, `gantt`, `stats`, `wiki`, or `files`. `files` opens the file window; if it cannot open, the call is refused with the notice's reason. |
+| `view` | `moai ctl view deferred on` | Set `deferred`, `backlog`, `archived`, `worktree`, `raw`, `diff`, or `column:<name>` on or off. `diff` is `SPC v D`: the list's diff pane, or the right pane's diff while the file window is open. |
 | `cell` | `moai ctl cell assignee off` | Show or hide a list field, including `id`, `priority`, `tally`, `tags`, `epic`, `names`, and `branch`. |
 | `detail` | `moai ctl detail right` | Show or hide the detail, or place it `right`, `bottom`, `left`, or `top`. |
 | `goto` | `moai ctl goto moai-1234 --enter` | Select a row without clearing a filter; `--project <number or path>` selects a project. |
@@ -54,6 +54,8 @@ These commands act on the selected open window. Use `-t <id>` to choose one expl
 | `theme` | `moai ctl theme dark` | Supported by web tabs; the explorer returns `unsupported` because terminal colours belong to the terminal. |
 
 `pane` changes proportions inside the explorer. It does not resize the terminal or browser; use the terminal's window manager or `tmux resize-pane` for that. View, cell, detail, pane, sort, and zone choices are saved in the person's config and may appear again when they reopen the explorer; `raw` is a session-only view toggle. Every change leaves a `⇄ ctl` notice in the explorer.
+
+`state` gains keys for the file window and the diff pane. `files` is `null` unless the file window is open; then it is an object with `checkout` (the root path), `here`, `cursor` (the path under it), `focus` (`tree`, `info` or `detail`), `search` (the query), `branch`, `changed_only`, `detail` and `diff`. `diff` describes the list's pane: `shown`, `folded` (shown but too narrow to stand), `layout` (`unified` or `split`), `id`, `scope`, `offers` (the scopes it can show), `files` (their count, `null` while unread) and `reading`. `panes` adds `files_width`, `diff_width` and `diff_height`, and `focus` can now be `diff`. The explorer's `screen` and `mode` say `files` while the window is open.
 
 On the web, view choices are saved in that browser's local storage, not in the user's moai config. The web has no `stats` screen, no `--wiki-width`, and no `--gantt-label`; those return `unsupported`. Web search covers all fields, so `find --in title` and other restricted scopes return `unsupported`. `zone none` follows the browser or TUI default.
 

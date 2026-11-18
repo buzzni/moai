@@ -1,0 +1,15 @@
+{
+  "exit": 0,
+  "out": {
+    "checkouts": [
+      {
+        "branch": "",
+        "current": true,
+        "issue": null,
+        "key": ".",
+        "main": true,
+        "milestone": null
+      }
+    ]
+  }
+}

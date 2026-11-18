@@ -20,6 +20,7 @@
  *   on (the wiki's Esc with nothing left to clear moves the focus to the tab bar).
  */
 import type { Client } from '../data/client.js'
+import type { FileWatch, StampAnswer } from '../data/files-refresh.ts'
 import type { IssueIndex, Path } from '../data/index.js'
 import type { PlanChange } from '../data/plan.js'
 import type { Copy } from '../i18n/index.js'
@@ -116,6 +117,11 @@ export interface PaneView {
   toggleRaw?(): void
   /** The body is shown as raw markdown now (the `SPC v r` menu item's state). */
   raw?(): boolean
+  fileWatch?(): FileWatch | null
+  /** `answer` is the stamp read that found the change: a null stamp is a path that is gone or no longer readable. */
+  refreshFileStamps?(watch: FileWatch, dirs: string[], file: boolean, answer?: StampAnswer): Promise<void>
+  refreshFileChanges?(watch: FileWatch, fingerprint: string): Promise<void>
+  filesState?(): { diff: boolean; detail: boolean; changed: boolean }
   /** The pane's tab was left: save what should come back with it into the store (the wiki's page and trail). */
   leave?(): void
   destroy?(): void
@@ -130,6 +136,7 @@ export interface Panes {
   board: MountPane
   detail: MountPane
   wiki?: MountPane
+  files?: MountPane
   /** The gantt tab (view/gantt.ts); like the list and board it fills the main pane, with the detail beside it. */
   gantt?: MountPane
 }

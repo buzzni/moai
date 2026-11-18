@@ -297,6 +297,10 @@ only `Refs:`, `Closes:` and `Fixes:` lines count. A commit that only picks up or
 closes work starts with `chore(tracker):`, and the explorer's detail leaves it
 out. Do not copy commit hashes into notes — a rebase makes them stale.
 
+## Inspect an issue’s changes
+
+Use `moai diff <id>` to inspect an issue's changes as a patch. It selects the first nonempty scope among the issue's commits, branch, and uncommitted changes; use `--scope` to specify a scope, `--stat` for a file summary, or `--path` to target a single file. Scope details and truncation notices are sent to standard error. For scripts, `--json` provides the same scope selection along with structured file data; see [Read an issue's changes](json.md#read-an-issues-changes).
+
 ## Review
 
 A review is an issue of its own, under the work it looks at:
@@ -381,4 +385,4 @@ where its contributors read them rather than repeated here:
   broken data, the same as a broken line in `issues.jsonl` — see [An archive file
   cannot be read](recovery.md#an-archive-file-cannot-be-read)
 
-Decided in: moai-ifvh moai-0zjo moai-40ht moai-bx6t moai-9793 moai-ug3j moai-gelm moai-tllo moai-snyk moai-zynt moai-j9nf moai-jtvp moai-fx9t moai-bth3 moai-r0x8 moai-9tqo moai-g8pt moai-lj8g moai-1m21 moai-uwi9 moai-ns7a moai-mkzo moai-w30o moai-4v3h moai-7eeq moai-ccuy moai-fcj3 moai-p9dh
+Decided in: moai-vyu7 moai-ifvh moai-0zjo moai-40ht moai-bx6t moai-9793 moai-ug3j moai-gelm moai-tllo moai-snyk moai-zynt moai-j9nf moai-jtvp moai-fx9t moai-bth3 moai-r0x8 moai-9tqo moai-g8pt moai-lj8g moai-1m21 moai-uwi9 moai-ns7a moai-mkzo moai-w30o moai-4v3h moai-7eeq moai-ccuy moai-fcj3 moai-p9dh

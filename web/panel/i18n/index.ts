@@ -40,7 +40,7 @@ export interface TipsCopy {
 export interface ShellCopy {
   /** Accessible name of the tab strip. */
   tabsLabel: string
-  tabs: { board: string; list: string; wiki: string; gantt: string }
+  tabs: { board: string; list: string; wiki: string; gantt: string; files: string }
   /** The position toggle's name says what pressing does; under 640px it says why it is off. */
   detailToRight: string
   detailToTop: string
@@ -274,7 +274,7 @@ export interface ZoneCopy {
  * The key table names each binding by a label id; these are the words for them. The English follows moai's own
  * `tui.*` words where the panel shows the same thing as the TUI: the state labels (`tui.state.*`, without the
  * TUI's `●` sort mark) and the root and layer names (`tui.menu.root`, `tui.group.*`), except `SPC g`, which the
- * panel calls Go (`tui.group.screen` is "screen") and `SPC w`, which the TUI has not.
+ * panel calls Go (`tui.group.screen` is "screen") and `SPC x`, which the TUI has not (its pane moves are Ctrl-w).
  */
 export interface KeyTableCopy {
   labels: Record<KeyLabel, string>
@@ -382,6 +382,8 @@ export interface Copy {
   keys: KeysCopy
   table: KeyTableCopy
   wiki: WikiCopy
+  diff: { owner: string; unified: string; side: string; narrow: string; binary: string; empty: string; truncated: string; retry: string; timeout: string; large: string; anyway: string; plain: string; terminal: string }
+  files: { collapsed: string; checkout: string; changed: string; diff: string; detail: string; on: string; off: string; noIssue: string; search: string; binary: string; truncated: string; readError: string; directoryError: string; searchError: string; matches: string; ignoredUnavailable: string; expansionLimit: string; unavailable: string }
 }
 
 // ── the lookup ─────────────────────────────────────────────────────────────────────────────────────────

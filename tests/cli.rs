@@ -2869,6 +2869,7 @@ fn every_command_speaks_json() {
         vec!["show", "issue", "--json"],
         vec!["show", "epic", "--json"],
         vec!["show", &id, "--json"],
+        vec!["diff", &id, "--json"],
     ] {
         one_json_value(&ok(s.path(), &args));
     }
@@ -9841,6 +9842,7 @@ const JSON_SWEEP: &[&str] = &[
     "ready",
     "prime",
     "show",
+    "diff",
     // 거르개가 고른 줄을 센다(moai-1hka.k16) — 객체 하나를 낸다.
     "stats",
     "archive",
@@ -10663,6 +10665,7 @@ fn every_command_still_speaks_json() {
         vec!["show", "--tree", "--json"],
         vec!["show", "--removed", "--json"],
         vec!["show", &id, "--json"],
+        vec!["diff", &id, "--json"],
         vec!["show", &epic, "--json"],
         vec!["stats", "--json"],
         vec!["archive", "--dry-run", "--json"],
@@ -34280,6 +34283,14 @@ fn web_serves_the_page_and_the_boot() {
     assert_eq!(people["group"], "assignee");
     assert!(people["order"].as_str().unwrap().contains("item=priority,due"));
     assert!(boot["columns"]["backlog"]["name"].is_string(), "{boot}");
+    // moai-dy7a.w38: the explorer's file groups, whole — the page keeps no extension table of its own.
+    let groups = &boot["file_groups"];
+    let keys: Vec<&String> = groups.as_object().expect("file_groups").keys().collect();
+    assert_eq!(keys, ["binary", "data", "doc", "script", "source"], "{groups}");
+    let has = |group: &str, field: &str, word: &str| groups[group][field].as_array().unwrap().iter().any(|w| w == word);
+    assert!(has("source", "ext", "rs") && has("source", "ext", "tsx") && has("doc", "ext", "md"), "{groups}");
+    assert!(has("data", "ext", "toml") && has("binary", "ext", "lock") && has("binary", "ext", "svg"), "{groups}");
+    assert!(has("script", "ext", "sh") && has("script", "names", "Makefile"), "{groups}");
 
     let (status, _, body) = get(web.port, "/api/status");
     assert_eq!(status, 200, "{body}");
@@ -36031,4 +36042,245 @@ fn supervisor_watch_heads_skip_promote_notes_and_moves() {
     let result = ok(s.path(), &["watch", &backlog, "--since", NOW]);
     let event: serde_json::Value = serde_json::from_str(&result).unwrap();
     assert_eq!(event["head"], format!("{backlog} 진행 중 결정이 필요합니다."));
+}
+
+#[test]
+fn diff_reads_commits_and_worktree_scopes_without_writing() {
+    let s = Scratch::new("diff-scopes");
+    let root = s.path();
+    git(root, &["init", "-q"]);
+    ok(root, &["init", "argos"]);
+    let id = field(&ok(root, &["add", "change", "--json"]), "id");
+    std::fs::write(root.join("tracked"), "first\n").unwrap();
+    git(root, &["add", "-A"]);
+    git(root, &["commit", "-qm", &format!("feat: {id}")]);
+    let json: serde_json::Value = serde_json::from_str(&ok(root, &["diff", &id, "--json"])).unwrap();
+    assert_eq!(json["scope"], "commits");
+    assert!(
+        json["files"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .any(|f| f["path"] == "tracked" && f["hunks"][0]["lines"][0]["text"] == "first")
+    );
+    assert!(json.get("vcs_error").is_none());
+    let out = moai(root, &["diff", &id]);
+    assert!(out.status.success());
+    let stdout = String::from_utf8(out.stdout).unwrap();
+    let stderr = String::from_utf8(out.stderr).unwrap();
+    assert!(stdout.contains("+first") && !stdout.contains("\u{1b}["));
+    assert!(stderr.contains("commits"));
+    let missing = moai(root, &["diff", &id, "--scope", "working", "--json"]);
+    assert!(!missing.status.success());
+    assert_eq!(serde_json::from_slice::<serde_json::Value>(&missing.stderr).unwrap()["code"], "bad_input");
+
+    let epic = field(&ok(root, &["add", "epic", "--type", "epic", "--json"]), "id");
+    let side = root.join("worktree");
+    let branch = format!("worktree-{epic}");
+    git(root, &["worktree", "add", "-qb", &branch, side.to_str().unwrap()]);
+    std::fs::write(side.join("--output=evil"), "new\n").unwrap();
+    let index_name = git(&side, &["rev-parse", "--git-path", "index"]);
+    let index = side.join(index_name.trim());
+    let before = std::fs::read(&index).unwrap();
+    let json: serde_json::Value = serde_json::from_str(&ok(root, &["diff", &epic, "--json"])).unwrap();
+    assert_eq!(json["scope"], "working");
+    assert!(
+        json["files"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .any(|f| f["path"] == "--output=evil" && f["hunks"][0]["lines"][0]["text"] == "new")
+    );
+    let stat: serde_json::Value = serde_json::from_str(&ok(root, &["diff", &epic, "--stat", "--json"])).unwrap();
+    assert!(stat["files"][0].get("hunks").is_none());
+    let bad = moai(root, &["diff", &epic, "--path=--output=bad", "--json"]);
+    assert!(!bad.status.success());
+    assert!(!side.join("bad").exists());
+    assert_eq!(before, std::fs::read(index).unwrap());
+    std::fs::write(side.join("large"), "x".repeat(2 * 1024 * 1024 + 100)).unwrap();
+    let cut: serde_json::Value = serde_json::from_str(&ok(root, &["diff", &epic, "--json"])).unwrap();
+    assert_eq!(cut["truncated"], true);
+    let one: serde_json::Value =
+        serde_json::from_str(&ok(root, &["diff", &epic, "--path=--output=evil", "--json"])).unwrap();
+    assert_eq!(one["total"], 2);
+    assert_eq!(one["files"].as_array().unwrap().len(), 1);
+}
+
+#[test]
+fn diff_of_one_renamed_file_shows_only_the_lines_it_changed() {
+    let s = Scratch::new("diff-rename-path");
+    let root = s.path();
+    git(root, &["init", "-q"]);
+    ok(root, &["init", "argos"]);
+    let id = field(&ok(root, &["add", "issue", "--json"]), "id");
+    let text: String = (0..30).map(|n| format!("line {n}\n")).collect();
+    std::fs::write(root.join("before.txt"), &text).unwrap();
+    git(root, &["add", "-A"]);
+    git(root, &["commit", "-qm", "base"]);
+    git(root, &["mv", "before.txt", "after.txt"]);
+    std::fs::write(root.join("after.txt"), text.replace("line 7\n", "line seven\n")).unwrap();
+    git(root, &["commit", "-qam", &format!("feat: {id}")]);
+    let out = ok(root, &["diff", &id, "--scope=commits", "--path=after.txt"]);
+    assert!(out.contains("rename from before.txt"), "{out}");
+    assert!(out.contains("+line seven") && out.contains("-line 7"), "{out}");
+    assert!(!out.contains("+line 20"), "the renamed file read as a whole new one: {out}");
+    let json = json_of(&ok(root, &["diff", &id, "--scope=commits", "--path=after.txt", "--json"]));
+    let lines =
+        json["files"][0]["hunks"].as_array().unwrap().iter().flat_map(|h| h["lines"].as_array().unwrap().clone());
+    assert_eq!(lines.filter(|l| l["kind"] == "add").count(), 1);
+    assert_eq!(json["files"][0]["adds"], 1);
+    // The old name is the list's, never the caller's.
+    assert!(!moai(root, &["diff", &id, "--scope=commits", "--path=before.txt"]).status.success());
+}
+
+#[test]
+fn diff_of_one_renamed_file_leaves_out_commits_that_touched_only_its_old_name() {
+    let s = Scratch::new("diff-rename-chain");
+    let root = s.path();
+    git(root, &["init", "-q"]);
+    ok(root, &["init", "argos"]);
+    let id = field(&ok(root, &["add", "issue", "--json"]), "id");
+    let text: String = (0..30).map(|n| format!("line {n}\n")).collect();
+    std::fs::write(root.join("a.txt"), &text).unwrap();
+    git(root, &["add", "-A"]);
+    git(root, &["commit", "-qm", "base"]);
+    // An edit under the first name, a rename, then a rename with an edit: each step names the file differently.
+    std::fs::write(root.join("a.txt"), text.replace("line 2\n", "line two\n")).unwrap();
+    git(root, &["commit", "-qam", &format!("feat: edit ({id})")]);
+    git(root, &["mv", "a.txt", "b.txt"]);
+    git(root, &["commit", "-qm", &format!("feat: first rename ({id})")]);
+    git(root, &["mv", "b.txt", "c.txt"]);
+    std::fs::write(root.join("c.txt"), text.replace("line 2\n", "line two\n").replace("line 9\n", "line nine\n"))
+        .unwrap();
+    git(root, &["commit", "-qam", &format!("feat: second rename ({id})")]);
+    let out = ok(root, &["diff", &id, "--scope=commits", "--path=c.txt"]);
+    assert!(out.contains("rename from b.txt") && out.contains("+line nine"), "{out}");
+    // The step before, read by the old name alone, would print as a whole new file.
+    assert!(!out.contains("new file mode") && !out.contains("+line 20"), "{out}");
+    assert!(!out.contains("first rename") && !out.contains("feat: edit"), "{out}");
+    let out = ok(root, &["diff", &id, "--scope=commits", "--path=b.txt"]);
+    assert!(out.contains("rename from a.txt") && !out.contains("feat: edit") && !out.contains("+line two"), "{out}");
+}
+
+#[test]
+fn diff_without_git_repository_returns_one_value_and_a_vcs_error() {
+    let s = init("diff-no-git");
+    let id = field(&ok(s.path(), &["add", "issue", "--json"]), "id");
+    let value: serde_json::Value = serde_json::from_str(&ok(s.path(), &["diff", &id, "--json"])).unwrap();
+    assert_eq!(value["scope"], serde_json::Value::Null);
+    assert!(value["vcs_error"]["kind"].is_string());
+}
+
+#[test]
+fn diff_member_prefers_own_commits_and_owner_falls_back_to_branch() {
+    let s = Scratch::new("diff-order");
+    let root = s.path();
+    git(root, &["init", "-q"]);
+    ok(root, &["init", "argos"]);
+    let epic = field(&ok(root, &["add", "epic", "--type", "epic", "--json"]), "id");
+    let member = field(&ok(root, &["add", "member", "-e", &epic, "--json"]), "id");
+    ok(root, &["mv", &member, "in_progress"]);
+    git(root, &["add", "-A"]);
+    git(root, &["commit", "-qm", "base"]);
+    let side = root.join("worker");
+    let branch = format!("worktree-{epic}");
+    git(root, &["worktree", "add", "-qb", &branch, side.to_str().unwrap()]);
+    std::fs::write(side.join("committed"), "committed\n").unwrap();
+    git(&side, &["add", "committed"]);
+    git(&side, &["commit", "-qm", &format!("feat: {member}")]);
+    let v: serde_json::Value = serde_json::from_str(&ok(root, &["diff", &epic, "--json"])).unwrap();
+    assert_eq!(v["scope"], "branch");
+    std::fs::write(side.join(".env"), "visible\n").unwrap();
+    let v: serde_json::Value = serde_json::from_str(&ok(root, &["diff", &epic, "--json"])).unwrap();
+    assert_eq!(v["scope"], "working");
+    assert!(
+        v["files"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .any(|f| f["path"] == ".env" && f["hunks"][0]["lines"][0]["text"] == "visible")
+    );
+    // The epic's own worktree is where its work happens; asked from there, the answer is the same.
+    let here: serde_json::Value = serde_json::from_str(&ok(&side, &["diff", &epic, "--json"])).unwrap();
+    assert_eq!(here["scope"], "working");
+    let v: serde_json::Value = serde_json::from_str(&ok(root, &["diff", &member, "--json"])).unwrap();
+    assert_eq!(v["scope"], "commits");
+    assert_eq!(v["offers"][0]["owner"], epic);
+    assert!(v["files"].as_array().unwrap().iter().any(|f| f["path"] == "committed"));
+}
+
+#[test]
+fn web_diff_matches_cli_and_rejects_unlisted_paths() {
+    let s = Scratch::new("web-diff-parity");
+    let root = s.path();
+    git(root, &["init", "-q"]);
+    ok(root, &["init", "argos"]);
+    let id = field(&ok(root, &["add", "issue", "--json"]), "id");
+    git(root, &["add", "-A"]);
+    git(root, &["commit", "-qm", "base"]);
+    std::fs::write(root.join("sample.rs"), "let text = \"한글\";\n").unwrap();
+    git(root, &["add", "sample.rs"]);
+    git(root, &["commit", "-qm", &format!("feat: {id}")]);
+    std::fs::write(root.join(".gitignore"), "ignored/\n").unwrap();
+    std::fs::create_dir(root.join("ignored")).unwrap();
+    std::fs::create_dir(root.join("needle-folder")).unwrap();
+    std::fs::write(root.join("ignored/needle.txt"), "hidden from search").unwrap();
+    let cli = json_of(&ok(root, &["diff", &id, "--scope=commits", "--json"]));
+    let web = serve(root);
+    for endpoint in [
+        "/api/checkouts",
+        "/api/files",
+        "/api/file?path=sample.rs",
+        "/api/find?q=sample",
+        "/api/ignored",
+        "/api/changes?root=.",
+        "/api/files-stamp?dir=.&path=sample.rs",
+    ] {
+        let (status, _, body) = get(web.port, endpoint);
+        assert_eq!(status, 200, "{endpoint}: {body}");
+        assert_eq!(json_of(&body)["exit"], 0, "{endpoint}: {body}");
+    }
+    let (_, _, body) = get(web.port, "/api/find?q=needle");
+    assert!(json_of(&body)["out"]["matches"].as_array().unwrap().is_empty());
+    let (_, _, body) = get(web.port, "/api/ignored");
+    assert!(
+        json_of(&body)["out"]["dirs"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .any(|v| v.as_str().is_some_and(|v| v.trim_end_matches('/') == "ignored"))
+    );
+    let (status, _, body) = get(web.port, &format!("/api/diff?id={id}&scope=commits"));
+    assert_eq!(status, 200, "{body}");
+    let mut response = json_of(&body)["out"].clone();
+    // The web adds the mark and how far highlighting got; `moai diff --json` carries neither.
+    assert_eq!(response.as_object_mut().unwrap().remove("highlight"), Some(serde_json::json!("full")));
+    assert!(cli.get("highlight").is_none());
+    for file in response["files"].as_array_mut().unwrap() {
+        assert_eq!(file.as_object_mut().unwrap().remove("mark"), Some(serde_json::json!("A")));
+        for hunk in file["hunks"].as_array_mut().unwrap() {
+            for line in hunk["lines"].as_array_mut().unwrap() {
+                line.as_object_mut().unwrap().remove("spans");
+            }
+        }
+    }
+    assert_eq!(response, cli);
+    assert!(cli["files"].as_array().unwrap().iter().all(|f| f.get("mark").is_none()));
+    // Without a scope the list comes whole, in the scope `/api/diff` picks, beside the offers it always gave.
+    let (status, _, body) = get(web.port, &format!("/api/changes?id={id}"));
+    assert_eq!(status, 200, "{body}");
+    let list = json_of(&body)["out"].clone();
+    let (_, _, picked) = get(web.port, &format!("/api/diff?id={id}"));
+    assert_eq!(list["scope"], json_of(&picked)["out"]["scope"]);
+    assert_eq!(list["offers"], cli["offers"]);
+    assert!(list.get("vcs_error").is_some_and(serde_json::Value::is_null), "{list}");
+    assert_eq!(list["total"], 1);
+    assert_eq!(list["truncated"], false);
+    assert_eq!(list["files"][0]["path"], "sample.rs");
+    assert_eq!(list["files"][0]["mark"], "A");
+    assert!(list["files"][0].get("hunks").is_none());
+    for path in ["--output%3D/tmp/x", "-x", "%3A%28top%29a"] {
+        let (status, _, _) = get(web.port, &format!("/api/diff?id={id}&scope=commits&path={path}"));
+        assert_eq!(status, 404, "{path}");
+    }
 }

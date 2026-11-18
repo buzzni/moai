@@ -2752,6 +2752,7 @@ mod tests {
             | Mode::Sort(_)
             | Mode::Stats(_)
             | Mode::Wiki(_)
+            | Mode::Files(_)
             | Mode::Proposals(_) => None,
         }
     }

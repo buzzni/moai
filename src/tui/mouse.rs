@@ -46,6 +46,11 @@ pub struct Drawn {
     pub top: usize,
     /// 상세 칸 — 테두리까지. 숨겼거나 접혀 안 섰으면 없다(`draw::split_body`).
     pub detail: Option<Rect>,
+    /// The side pane — the detail's and the list's diff pane's together (moai-ffk9.cij). The line between it and
+    /// the list moves the list's share; with the diff off it is [`Drawn::detail`].
+    pub side: Option<Rect>,
+    /// The list's diff pane — with its border. Off or folded, none.
+    pub diff: Option<Rect>,
     /// 보드의 카드가 보이는 자리와 그 줄(`App::rows` 의 첨자)(moai-9nfw). 목록으로 세웠으면 비었다 — 그때는
     /// [`Drawn::rows`] 가 줄 자리다.
     pub cards: Vec<(Rect, usize)>,
@@ -60,6 +65,8 @@ pub struct Drawn {
     /// 위키 창의 칸 자리(moai-o3cb) — 창이 떠 있을 때만 선다. 창은 몸통을 덮으므로 그동안 위의 목록·상세 자리는 창
     /// 밑에 깔린 그림의 것이다.
     pub wiki: Option<WikiAt>,
+    /// The file window's panes (moai-ffk9.rpf) — only while it is up, the wiki window's reason.
+    pub files: Option<FilesAt>,
     /// 간트 위젯이 선 자리 — 목록 칸의 테두리 안쪽(moai-i4hf). 간트로 세웠을 때만 선다. 고정 칸·머리·날짜 칸·나눔
     /// 선은 이 자리와 `App::chart` 로 위젯이 다시 잰다(`moai_gantt::Layout::of`) — 그린 쪽과 맞히는 쪽이 한 자로 잰다.
     pub chart: Option<Rect>,
@@ -82,6 +89,36 @@ pub struct WikiAt {
     pub links: Vec<(Rect, usize)>,
 }
 
+/// Where the file window drew — `draw::files_window` gives it.
+#[derive(Debug, Clone, Default, PartialEq, Eq)]
+pub struct FilesAt {
+    /// The tree — with its border.
+    pub tree: Rect,
+    /// Where the rows stand — inside the border, below the root's line. Its n-th line is the row `top + n`.
+    pub rows: Rect,
+    /// The tree's scroll in that frame — a click is hit against it ([`Drawn::top`]'s reason).
+    pub top: usize,
+    /// The right pane — with its border. None when too narrow to stand.
+    pub info: Option<Rect>,
+    /// The detail and the diff when the right side is theirs (moai-ffk9.211) — each with its border.
+    pub detail: Option<Rect>,
+    pub diff: Option<Rect>,
+}
+
+/// Which dividing line a drag holds — each moves a share of its own.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum Divider {
+    /// Between the list and the detail (`App::list_width`·`App::list_height`).
+    Explorer,
+    /// The wiki window's (`App::wiki_width`, moai-p61w).
+    Wiki,
+    /// The file window's (`App::files_width`, moai-ffk9.rpf).
+    Files,
+    /// Between the detail and the list's diff pane (`App::diff_width`·`App::diff_height`, moai-ffk9.cij) — the
+    /// list's share does not move.
+    Side,
+}
+
 /// 잡은 선(moai-irrj.mhr) — 끄는 동안 `App::dragging` 이 든다.
 ///
 /// **선은 잡은 자리에서 손이 간 만큼 간다**(리뷰). 맞닿은 두 테두리 줄이 다 잡히는데(`App::grab_at`) 손이 선 칸을 곧
@@ -95,9 +132,9 @@ pub struct Grab {
     /// 잡기 전의 몫. 손이 잡은 칸으로 돌아오면 이 몫으로 돌아간다 — 선을 누르다 손이 옆으로 미끄러진 것만으로는
     /// 처음값이 설정에 박히지 않는다(`App::list_width`·`App::wiki_width`).
     was: Option<u16>,
-    /// 위키 창의 선을 잡았는가(moai-p61w) — 그때는 위키 창의 몫(`App::wiki_width`)을 옮긴다. 목록·상세의 선과
-    /// 몫이 따로라(2026-10-04 사용자 결정) 어느 선을 잡았는지를 끝까지 든다.
-    wiki: bool,
+    /// 어느 선을 잡았는가 — 위키 창의 선이면 위키 창의 몫(`App::wiki_width`, moai-p61w), 파일 창의 선이면 그 창의 몫을
+    /// 옮긴다. 목록·상세의 선과 몫이 따로라(2026-10-04 사용자 결정) 어느 선을 잡았는지를 끝까지 든다.
+    on: Divider,
 }
 
 impl App {
@@ -114,6 +151,8 @@ impl App {
                 Mode::Browse | Mode::Stats(_) => true,
                 // 고르기 창은 키로 다루는 창이다 — 그동안도 놓는다(위의 까닭).
                 Mode::Wiki(w) => w.typing.is_none() && w.choose.is_none(),
+                // The file window's search field takes text too (moai-ffk9.rid).
+                Mode::Files(w) => w.typing.is_none(),
                 _ => false,
             }
     }
@@ -159,7 +198,7 @@ impl App {
             self.run(super::keys::Browse::Proposals, &[]);
             return;
         }
-        // **가로 휠은 간트의 날짜 축만 받는다**(moai-i4hf.exq) — 가로 휠이 없는 마우스를 위해 Shift+휠도 가로다. 다른
+        // **가로 휠은 간트의 날짜 축과 파일 창의 내용 칸만 받는다**(moai-i4hf.exq, moai-ffk9.3fd) — 가로 휠이 없는 마우스를 위해 Shift+휠도 가로다. 다른
         // 자리에서는 가로로 구를 것이 없어 버린다. 한 번에 한 칸 — 축의 한 칸은 확대에 따라 한 시간~한 주다.
         // **Shift+휠이 가로인 것은 간트 위에서만이다** — 목록·상세·통계 창·위키 창에서는 이 에픽 전처럼 세로로 구른다. 어디서나
         // 가로로 읽으면 Shift 를 쥔 휠이 그 창들에서 아무 일도 안 한다.
@@ -229,7 +268,19 @@ impl App {
         if matches!(self.mode, Mode::Wiki(_)) {
             return self.wiki_pointer(kind, wheel, at);
         }
+        if matches!(self.mode, Mode::Files(_)) {
+            return self.files_pointer(kind, wheel, sideways, at);
+        }
         if self.mode != Mode::Browse {
+            return;
+        }
+        // **The sideways wheel over the list's diff pane scrolls its text sideways** (moai-ffk9.cij) — the file pane's
+        // rule; the pane stands outside the chart.
+        if let Some(by) = sideways
+            && self.drawn.diff.is_some_and(|r| r.contains(at))
+        {
+            self.acted();
+            self.diff.pan_by(by * super::diff::PAN_WHEEL as isize);
             return;
         }
         // **간트가 먼저 받는다**(moai-i4hf.exq) — 막대·날짜 머리·나눔 선은 목록의 줄 자리 위에 선다. 목록·상세 사이 선은
@@ -328,6 +379,84 @@ impl App {
         }
     }
 
+    /// Over the file window (moai-ffk9.rpf) — the wiki window's hand. **A click puts the focus on the pane and, on a
+    /// row, the cursor there**; the wheel scrolls the pane under the pointer and moves neither the focus nor the
+    /// cursor. Dragging the line between the panes resizes them, keeping the window's own share
+    /// (`App::files_width`), written once on release ([`App::drop_line`]).
+    ///
+    /// The sideways wheel scrolls the right pane's text sideways (moai-ffk9.3fd) — [`super::files::PAN_WHEEL`] cells a
+    /// notch; over the tree it does nothing.
+    fn files_pointer(&mut self, kind: MouseEventKind, wheel: Option<isize>, sideways: Option<isize>, at: Position) {
+        use super::files::Side;
+        if let (MouseEventKind::Drag(MouseButton::Left), Some(grab)) = (kind, self.dragging) {
+            return self.drag_to(grab, at);
+        }
+        let Some(d) = self.drawn.files.as_ref() else { return };
+        // The checkout picker stands over the panes — the mouse leaves them alone while it is open (moai-ffk9.211).
+        if matches!(&self.mode, Mode::Files(w) if w.pick.is_some()) {
+            return;
+        }
+        let pressed = matches!(kind, MouseEventKind::Down(MouseButton::Left));
+        if pressed && let Some(grab) = self.files_grab_at(d, at) {
+            self.acted();
+            if let Mode::Files(w) = &mut self.mode {
+                w.chord.clear();
+            }
+            self.dragging = Some(grab);
+            return;
+        }
+        let on = if d.detail.is_some_and(|r| r.contains(at)) {
+            Side::Detail
+        } else if d.info.is_some_and(|r| r.contains(at)) {
+            Side::Info
+        } else if d.tree.contains(at) {
+            Side::Tree
+        } else {
+            return;
+        };
+        if let Some(by) = sideways {
+            if on == Side::Info {
+                self.acted();
+                if let Mode::Files(w) = &mut self.mode {
+                    w.chord.clear();
+                    w.pan_wheel(by);
+                }
+            }
+            return;
+        }
+        if !pressed && wheel.is_none() {
+            return;
+        }
+        let row = (on == Side::Tree && d.rows.contains(at)).then(|| d.top + usize::from(at.y - d.rows.y));
+        self.acted();
+        let Mode::Files(w) = &mut self.mode else { return };
+        match wheel {
+            Some(by) => w.roll(on, by),
+            None => {
+                w.chord.clear();
+                w.focus = on;
+                if let Some(n) = row.filter(|&n| n < w.rows().len()) {
+                    w.move_to(n);
+                }
+            }
+        }
+    }
+
+    /// The file window's dividing line — the tree's last border column and the right pane's first, as
+    /// [`App::wiki_grab_at`].
+    fn files_grab_at(&self, d: &FilesAt, at: Position) -> Option<Grab> {
+        let info = d.info?;
+        let end = d.tree.right();
+        let line = end.checked_sub(1)?;
+        let rows = d.tree.y..d.tree.bottom();
+        (rows.contains(&at.y) && (at.x == line || at.x == end && info.x == end)).then_some(Grab {
+            from: at.x,
+            line,
+            was: self.files_width,
+            on: Divider::Files,
+        })
+    }
+
     /// 마우스로 무언가 한다 — **키 하나를 누른 것과 같이 센다**(`App::key`). 쓰기의 알림은 다음 누름에
     /// 걷히고, 기다리던 열(`g`·`Ctrl-w`)은 버린다: 누르기를 사이에 둔 `g` 와 `g` 가 `gg` 로 이으면
     /// 사람이 친 적 없는 맨 위로 가기가 선다.
@@ -339,7 +468,9 @@ impl App {
     /// 그 자리에 선 칸. 누르기와 휠이 같은 자로 가른다 — 두 칸은 겹치지 않는다(`draw::split_body`).
     fn pane_at(&self, at: Position) -> Option<Pane> {
         let d = &self.drawn;
-        if d.detail.is_some_and(|r| r.contains(at)) {
+        if d.diff.is_some_and(|r| r.contains(at)) {
+            Some(Pane::Diff)
+        } else if d.detail.is_some_and(|r| r.contains(at)) {
             Some(Pane::Detail)
         } else if d.list.contains(at) {
             Some(Pane::Explorer)
@@ -383,9 +514,28 @@ impl App {
     /// 앞에 선 칸(왼쪽·위)의 끝 테두리와 뒤에 선 칸의 첫 테두리, 둘 다 잡힌다 — 한 칸짜리 줄만 받으면 손이
     /// 한 칸 어긋날 때마다 그 칸을 누른 것이 된다. 상세가 위아래에 서면 그 줄은 칸의 제목 줄이기도 하다.
     /// 두 칸은 사이 없이 맞닿으므로(`draw::split_body`) 뒤 칸의 첫 테두리는 앞 칸이 끝난 바로 다음 칸이다.
+    ///
+    /// **Two lines can stand side by side** (moai-ffk9.cij): the list's and, inside the side pane, the one between the
+    /// detail and the diff. Each takes its own two border cells — the detail is at least [`super::draw`]'s floor wide,
+    /// so the four never overlap — and the grab holds which one it took to the end, so the side line never moves the
+    /// list's share.
     fn grab_at(&self, at: Position) -> Option<Grab> {
         let d = &self.drawn;
-        let detail = d.detail?;
+        let vertical = self.detail_side().vertical();
+        if let (Some(detail), Some(_), Some(side)) = (d.detail, d.diff, d.side) {
+            let (p, end, was) = if vertical {
+                (at.y, detail.bottom(), self.diff_height)
+            } else {
+                (at.x, detail.right(), self.diff_width)
+            };
+            if let Some(line) = end.checked_sub(1)
+                && side.contains(at)
+                && (p == line || p == end)
+            {
+                return Some(Grab { from: p, line, was, on: Divider::Side });
+            }
+        }
+        let detail = d.side.or(d.detail)?;
         let front = if self.detail_side().first() { detail } else { d.list };
         let (p, end, was) = if self.detail_side().vertical() {
             (at.y, front.bottom(), self.list_height)
@@ -393,7 +543,7 @@ impl App {
             (at.x, front.right(), self.list_width)
         };
         let line = end.checked_sub(1)?;
-        (d.body.contains(at) && (p == line || p == end)).then_some(Grab { from: p, line, was, wiki: false })
+        (d.body.contains(at) && (p == line || p == end)).then_some(Grab { from: p, line, was, on: Divider::Explorer })
     }
 
     /// 위키 창의 칸 사이 선을 잡았는가(moai-p61w) — 목록의 끝 테두리와 본문의 첫 테두리, 둘 다 잡힌다([`App::grab_at`] 와
@@ -407,7 +557,7 @@ impl App {
             from: at.x,
             line,
             was: self.wiki_width,
-            wiki: true,
+            on: Divider::Wiki,
         })
     }
 
@@ -421,13 +571,39 @@ impl App {
     /// **위키 창의 선도 같은 셈이다**(moai-p61w) — 몸통은 위키 창이 그린 두 칸을 합친 자리, 창은 목록이 늘 왼쪽이라
     /// 상세가 오른쪽에 선 가름과 같고, 몫은 위키 창의 것(`App::wiki_width`)이다. 창이 닫혔으면 아무 일도 없다.
     fn drag_to(&mut self, grab: Grab, at: Position) {
-        let (body, side) = if grab.wiki {
-            let Some(d) = self.drawn.wiki.as_ref() else { return };
-            let Some(page) = d.page else { return };
-            let body = Rect::new(d.list.x, d.list.y, page.right().saturating_sub(d.list.x), d.list.height);
-            (body, super::view::DetailAt::Right)
-        } else {
-            (self.drawn.body, self.detail_side())
+        let (body, side) = match grab.on {
+            Divider::Wiki => {
+                let Some(d) = self.drawn.wiki.as_ref() else { return };
+                let Some(page) = d.page else { return };
+                let body = Rect::new(d.list.x, d.list.y, page.right().saturating_sub(d.list.x), d.list.height);
+                (body, super::view::DetailAt::Right)
+            }
+            Divider::Files => {
+                let Some(d) = self.drawn.files.as_ref() else { return };
+                let Some(info) = d.info else { return };
+                let body = Rect::new(d.tree.x, d.tree.y, info.right().saturating_sub(d.tree.x), d.tree.height);
+                (body, super::view::DetailAt::Right)
+            }
+            Divider::Explorer => (self.drawn.body, self.detail_side()),
+            Divider::Side => {
+                let Some(side) = self.drawn.side else { return };
+                let vertical = self.detail_side().vertical();
+                let (start, len, p) = if vertical { (side.y, side.height, at.y) } else { (side.x, side.width, at.x) };
+                if len == 0 {
+                    return;
+                }
+                let share = if p == grab.from {
+                    grab.was
+                } else {
+                    let line = (i32::from(grab.line) + i32::from(p) - i32::from(grab.from))
+                        .clamp(i32::from(start), i32::from(start) + i32::from(len) - 1);
+                    // The detail stands first — the line is its last border cell; the diff takes the rest.
+                    let detail = (line - i32::from(start) + 1) as u16;
+                    Some(super::draw::diff_share_for(side, vertical, len - detail))
+                };
+                let which = if vertical { "diff_height" } else { "diff_width" };
+                return self.set_share(which, share.map(i64::from));
+            }
         };
         let vertical = side.vertical();
         let (start, len, p) = if vertical { (body.y, body.height, at.y) } else { (body.x, body.width, at.x) };
@@ -444,10 +620,12 @@ impl App {
             let list = if side.first() { len - front } else { front };
             Some(super::draw::share_for(body, side, list))
         };
-        let which = match (grab.wiki, vertical) {
-            (true, _) => "wiki_width",
-            (false, true) => "list_height",
-            (false, false) => "list_width",
+        let which = match (grab.on, vertical) {
+            (Divider::Side, _) => unreachable!("the side line returned above"),
+            (Divider::Wiki, _) => "wiki_width",
+            (Divider::Files, _) => "files_width",
+            (Divider::Explorer, true) => "list_height",
+            (Divider::Explorer, false) => "list_width",
         };
         self.set_share(which, share.map(i64::from));
     }
@@ -459,6 +637,9 @@ impl App {
             "list_width" => self.list_width = share,
             "list_height" => self.list_height = share,
             "wiki_width" => self.wiki_width = share,
+            "files_width" => self.files_width = share,
+            "diff_width" => self.diff_width = share,
+            "diff_height" => self.diff_height = share,
             _ => {}
         }
     }
@@ -488,6 +669,7 @@ impl App {
     fn wheel(&mut self, at: Position, by: isize) {
         match self.pane_at(at) {
             Some(Pane::Detail) => self.detail.by(by),
+            Some(Pane::Diff) => self.diff.roll(by),
             Some(Pane::Explorer) => self.roll(|s| s.by(by)),
             None => {}
         }

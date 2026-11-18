@@ -187,7 +187,7 @@ function boot(storage, { rows = ROWS, indexOf = null } = {}) {
 test('shell: tabs switch the pane shown and the choice is remembered', () => {
   const storage = fakeStorage()
   const panel = boot(storage)
-  assert.deepEqual([...panel.doc.querySelectorAll('[role="tab"]')].map((tab) => tab.textContent), ['Board', 'List', 'Gantt', 'Wiki'])
+  assert.deepEqual([...panel.doc.querySelectorAll('[role="tab"]')].map((tab) => tab.textContent), ['Board', 'List', 'Gantt', 'Files', 'Wiki'])
   assert.equal(panel.tab('list').getAttribute('aria-selected'), 'true')
   assert.equal(panel.$('.m-pane-main[data-pane="list"]').hidden, false)
   assert.equal(panel.$('.m-pane-main[data-pane="board"]').hidden, true)
@@ -742,4 +742,10 @@ test('shell: leaving Gantt clears its folds while list expansion survives', () =
   panel.tab('gantt').click()
   assert.ok(panel.$('.g-row[data-id="se-e1.a"]'), 'returning opens every gantt folder')
   panel.shell.destroy()
+})
+
+test('the inner detail+diff split fills the outer detail place, so a short detail does not cut the diff short (moai-5tgg)', async () => {
+  const { readFileSync } = await import('node:fs')
+  const css = readFileSync(new URL('../panel/style/shell.css', import.meta.url), 'utf8')
+  assert.match(css, /\.m-shell \.m-split-detail > \.m-split \{[^}]*height: 100%/)
 })

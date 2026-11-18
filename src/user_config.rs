@@ -1410,12 +1410,17 @@ impl Doc {
             fields_known: look_words(t, FIELDS_KNOWN, &mut problems),
             detail: look_one(t, DETAIL, Want::Bool, Item::as_bool, &mut problems),
             detail_at: look_one(t, DETAIL_AT, Want::Word, word, &mut problems),
+            diff_layout: look_one(t, DIFF_LAYOUT, Want::Word, word, &mut problems),
+            diff: look_one(t, DIFF, Want::Bool, Item::as_bool, &mut problems),
+            diff_width: look_one(t, DIFF_WIDTH, Want::Number, Item::as_integer, &mut problems),
+            diff_height: look_one(t, DIFF_HEIGHT, Want::Number, Item::as_integer, &mut problems),
             layout: look_one(t, LAYOUT, Want::Word, word, &mut problems),
             timezone: look_one(t, TIMEZONE, Want::Word, word, &mut problems),
             mouse: look_one(t, MOUSE, Want::Bool, Item::as_bool, &mut problems),
             list_width: look_one(t, LIST_WIDTH, Want::Number, Item::as_integer, &mut problems),
             list_height: look_one(t, LIST_HEIGHT, Want::Number, Item::as_integer, &mut problems),
             wiki_width: look_one(t, WIKI_WIDTH, Want::Number, Item::as_integer, &mut problems),
+            files_width: look_one(t, FILES_WIDTH, Want::Number, Item::as_integer, &mut problems),
             gantt_label: look_one(t, GANTT_LABEL, Want::Number, Item::as_integer, &mut problems),
         };
         // **차례를 못 읽었으면 방향도 버린다**(moai-ys7c) — 둘은 한 벌이다. `sort = 3` 을 없는 키로 넘기고
@@ -1483,12 +1488,17 @@ impl Doc {
         let mut known = base.fields_known != new.fields_known;
         let mut detail = base.detail != new.detail;
         let mut detail_at = base.detail_at != new.detail_at;
+        let mut diff_layout = base.diff_layout != new.diff_layout;
+        let mut diff = base.diff != new.diff;
+        let mut diff_width = base.diff_width != new.diff_width;
+        let mut diff_height = base.diff_height != new.diff_height;
         let mut layout = base.layout != new.layout;
         let mut timezone = base.timezone != new.timezone;
         let mut mouse = base.mouse != new.mouse;
         let mut list_width = base.list_width != new.list_width;
         let mut list_height = base.list_height != new.list_height;
         let mut wiki_width = base.wiki_width != new.wiki_width;
+        let mut files_width = base.files_width != new.files_width;
         let mut gantt_label = base.gantt_label != new.gantt_label;
         // **이 세션이 적을 키가 손으로 적은 표 모양이면 그 키만 안 적는다**(moai-j7r3, moai-jr3z) — 무엇을 덮지
         // 않는가는 `set_hue` 와 같은 자다([`plain`]). `sort.by = "title"`·`[tui.sort]`·`sort = { … }` 은 무엇을
@@ -1539,12 +1549,17 @@ impl Doc {
         odd(&[FIELDS_KNOWN], true, &mut known);
         odd(&[DETAIL], false, &mut detail);
         odd(&[DETAIL_AT], false, &mut detail_at);
+        odd(&[DIFF_LAYOUT], false, &mut diff_layout);
+        odd(&[DIFF], false, &mut diff);
+        odd(&[DIFF_WIDTH], false, &mut diff_width);
+        odd(&[DIFF_HEIGHT], false, &mut diff_height);
         odd(&[LAYOUT], false, &mut layout);
         odd(&[TIMEZONE], false, &mut timezone);
         odd(&[MOUSE], false, &mut mouse);
         odd(&[LIST_WIDTH], false, &mut list_width);
         odd(&[LIST_HEIGHT], false, &mut list_height);
         odd(&[WIKI_WIDTH], false, &mut wiki_width);
+        odd(&[FILES_WIDTH], false, &mut files_width);
         odd(&[GANTT_LABEL], false, &mut gantt_label);
         if sort
             && new.layered_order.is_some()
@@ -1607,6 +1622,18 @@ impl Doc {
         if detail_at {
             changed |= put_value(t, DETAIL_AT, new.detail_at.as_deref().map(toml_edit::Value::from), &mut left);
         }
+        if diff_layout {
+            changed |= put_value(t, DIFF_LAYOUT, new.diff_layout.as_deref().map(toml_edit::Value::from), &mut left);
+        }
+        if diff {
+            changed |= put_value(t, DIFF, new.diff.map(toml_edit::Value::from), &mut left);
+        }
+        if diff_width {
+            changed |= put_value(t, DIFF_WIDTH, new.diff_width.map(toml_edit::Value::from), &mut left);
+        }
+        if diff_height {
+            changed |= put_value(t, DIFF_HEIGHT, new.diff_height.map(toml_edit::Value::from), &mut left);
+        }
         if layout {
             changed |= put_value(t, LAYOUT, new.layout.as_deref().map(toml_edit::Value::from), &mut left);
         }
@@ -1624,6 +1651,9 @@ impl Doc {
         }
         if wiki_width {
             changed |= put_value(t, WIKI_WIDTH, new.wiki_width.map(toml_edit::Value::from), &mut left);
+        }
+        if files_width {
+            changed |= put_value(t, FILES_WIDTH, new.files_width.map(toml_edit::Value::from), &mut left);
         }
         if gantt_label {
             changed |= put_value(t, GANTT_LABEL, new.gantt_label.map(toml_edit::Value::from), &mut left);
@@ -1714,6 +1744,15 @@ const DETAIL: &str = "detail";
 /// 서는가다. 한 키에 둘을 담으면(`detail = "right"` 로 켬까지) 옛 줄(`detail = true`)이 파싱에서
 /// 떨어져 사람이 끈 상세가 도로 켜진다.
 const DETAIL_AT: &str = "detail_at";
+/// How a diff stands — `unified`·`split` (moai-ffk9.41b, `SPC o s`).
+const DIFF_LAYOUT: &str = "diff_layout";
+/// Whether the list's diff pane stands — `SPC v D` (moai-ffk9.cij). Apart from [`DETAIL`]: the two stand together or
+/// alone, and the detail's line must not change meaning.
+const DIFF: &str = "diff";
+/// The diff's share (%) of the side pane it splits with the detail — side by side and stacked, each its own like
+/// [`LIST_WIDTH`]·[`LIST_HEIGHT`]. Dragged on the line between the two.
+const DIFF_WIDTH: &str = "diff_width";
+const DIFF_HEIGHT: &str = "diff_height";
 /// 목록을 줄로 세우는가 칸반 보드로 세우는가 — `list`·`board`(moai-9nfw). **새 창이 아니라 목록의 배치라**
 /// 보는 사람의 것이고, 그래서 상세의 자리([`DETAIL_AT`])처럼 `[tui]` 에 낱말로 산다.
 const LAYOUT: &str = "layout";
@@ -1728,6 +1767,8 @@ const LIST_WIDTH: &str = "list_width";
 const LIST_HEIGHT: &str = "list_height";
 /// 위키 창의 페이지 목록이 가져가는 폭의 몫(%) — 창의 칸 사이 선을 끌어 정한다(moai-p61w). 목록·상세의 몫과 따로다.
 const WIKI_WIDTH: &str = "wiki_width";
+/// The file window's tree share (%) — dragged on that window's line (moai-ffk9.rpf), apart from the list's.
+const FILES_WIDTH: &str = "files_width";
 /// 간트(`SPC g g`)의 고정 칸 폭 — 몫이 아니라 **칸 수**다(moai-i4hf.exq). 고정 칸과 날짜 칸 사이 선을 끌어 정한다.
 const GANTT_LABEL: &str = "gantt_label";
 const FIELDS_KNOWN: &str = "fields_known";
@@ -1744,6 +1785,12 @@ const FIELDS_KNOWN: &str = "fields_known";
 /// show_archived = false
 /// detail = true
 /// detail_at = "right"
+/// # How a diff stands — unified or split (side by side). Only once `SPC o s` was pressed.
+/// diff_layout = "split"
+/// # The list's diff pane (SPC v D) and its share (%) of the side pane — only once pressed or dragged.
+/// diff = true
+/// diff_width = 50
+/// diff_height = 40
 /// layout = "board"
 /// timezone = "Asia/Seoul"
 /// # 차례 목록 — 있으면 아래 옛 한 쌍을 이긴다. 그 한 쌍은 옛 바이너리가 읽도록 첫 필드를 비춰 함께 적힌다.
@@ -1759,6 +1806,8 @@ const FIELDS_KNOWN: &str = "fields_known";
 /// list_height = 70
 /// # 위키 창의 페이지 목록이 가져가는 몫(%) — 그 창의 선을 끈 적이 있을 때만 선다. 없으면 list_width 를 따른다.
 /// wiki_width = 30
+/// # The file window's tree share (%) — only once its line was dragged. Without it the window follows list_width.
+/// files_width = 35
 /// # 간트의 고정 칸 폭(칸) — 그 나눔 선을 끈 적이 있을 때만 선다.
 /// gantt_label = 48
 ///
@@ -1812,6 +1861,17 @@ pub struct Look {
     /// 있는지는 탐색기가 안다(`tui::view::DetailAt`). 모르는 낱말은 탐색기가 처음값으로 세우고
     /// (`App::apply_look`) 이 줄은 그대로 둔다 — 읽기는 관대하다.
     pub detail_at: Option<String>,
+    /// How a diff stands — `unified`·`split` (moai-ffk9.41b). **A word**, like [`Look::detail_at`]: the explorer knows
+    /// the words (`tui::diff::Layout`), stands unified on one it does not know and leaves the line as it is. The
+    /// explorer writes it only once `SPC o s` was pressed — the session's first look holds what it read.
+    pub diff_layout: Option<String>,
+    /// Whether the list's diff pane stands (moai-ffk9.cij, `SPC v D`). Unwritten until pressed; off meanwhile.
+    pub diff: Option<bool>,
+    /// The diff's share (%) of the side pane beside the detail — side by side (`diff_width`) and stacked
+    /// (`diff_height`), apart like [`Look::list_width`]·[`Look::list_height`]. Unwritten until the line between the
+    /// detail and the diff is dragged; half meanwhile. Out of range is pulled in by the explorer.
+    pub diff_width: Option<i64>,
+    pub diff_height: Option<i64>,
     /// 목록의 배치 — `list`·`board`(moai-9nfw). **낱말로 든다**: 무슨 낱말이 있는지는 탐색기가 안다
     /// (`tui::view::Layout`). 모르는 낱말은 탐색기가 목록으로 세우고 이 줄은 그대로 둔다 — 읽기는 관대하다.
     pub layout: Option<String>,
@@ -1835,6 +1895,10 @@ pub struct Look {
     /// [`Look::list_width`] 와 **따로다**(2026-10-04 사용자 결정): 위키는 읽는 창이라 본문을 넓게, 탐색기는 목록을 넓게
     /// 둘 수 있다. 끈 적 없으면 안 적히고, 그동안은 위키 창도 `list_width` 를 따른다.
     pub wiki_width: Option<i64>,
+    /// The file window's (`SPC g f`) tree share (%) — dragged on that window's line (moai-ffk9.rpf). Apart from
+    /// [`Look::list_width`] like [`Look::wiki_width`]; unwritten until dragged, and the window follows `list_width`
+    /// meanwhile.
+    pub files_width: Option<i64>,
     /// 간트의 고정 칸 폭(칸) — 나눔 선을 끌어 정한다(moai-i4hf.exq). 몫이 아니라 칸이다: 고정 칸은 줄의 id·제목을
     /// 담는 자리라 창이 넓어져도 같은 폭이어야 날짜 칸이 넓어진다. 끈 적 없으면 안 적힌다.
     pub gantt_label: Option<i64>,
@@ -3910,12 +3974,17 @@ mod tests {
             fields_known: None,
             detail: Some(false),
             detail_at: Some("bottom".into()),
+            diff_layout: Some("split".into()),
+            diff: Some(true),
+            diff_width: Some(40),
+            diff_height: Some(35),
             layout: Some("board".into()),
             timezone: Some("Asia/Seoul".into()),
             mouse: Some(false),
             list_width: Some(40),
             list_height: Some(60),
             wiki_width: Some(30),
+            files_width: Some(35),
             gantt_label: Some(48),
         };
         upd(&path, |doc| doc.merge_look(&Look::default(), &look)).unwrap();
@@ -4502,12 +4571,17 @@ mod tests {
             fields_known: None,
             detail: Some(true),
             detail_at: None,
+            diff_layout: None,
+            diff: None,
+            diff_width: None,
+            diff_height: None,
             layout: None,
             timezone: None,
             mouse: None,
             list_width: None,
             list_height: None,
             wiki_width: None,
+            files_width: None,
             gantt_label: None,
         };
         let a = Look { fields: Some(vec!["id".into(), "assignee".into()]), ..base.clone() };

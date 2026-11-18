@@ -1,0 +1,16 @@
+{
+  "exit": 0,
+  "out": {
+    "ignored_unavailable": true,
+    "matches": [
+      {
+        "end": 12,
+        "path": "docs/example.txt",
+        "start": 5
+      }
+    ],
+    "total": 1,
+    "truncated": false,
+    "walk_truncated": false
+  }
+}

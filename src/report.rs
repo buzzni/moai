@@ -9,6 +9,7 @@ use crate::model::{FUTURE_SLACK_SECS, Issue, Kind, days_since};
 use serde::Serialize;
 use std::collections::{BTreeMap, BTreeSet};
 
+pub mod changes;
 pub mod gantt;
 pub mod stats;
 

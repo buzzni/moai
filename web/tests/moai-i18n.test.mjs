@@ -125,3 +125,17 @@ test('lists come back as arrays and fill puts values into their places', () => {
   assert.equal(fill(COPY.en.shell.hidden, { names: 'a · b' }), 'a · b hidden')
   assert.equal(fill(COPY.ko.refreshedAt, { time: '12:00' }), '12:00 갱신')
 })
+
+test('the files tab names: "Changed files only" / "바뀐 파일만" as the TUI, and the pane layer is SPC x (moai-dy7a.tzl)', async () => {
+  for (const [code, name] of [['en', 'Changed files only'], ['ko', '바뀐 파일만']]) {
+    const copy = copyFor(code)
+    assert.equal(copy.files.changed, name, `${code} files.changed`)
+    assert.equal(copy.table.labels['view.changed'], name, `${code} table.labels.view.changed`)
+  }
+  for (const code of ['en', 'ko', 'ja', 'zh']) {
+    const file = await bundle(code)
+    assert.equal(file['page.table.layers.w'], undefined, `${code}: the old layer key is gone`)
+    assert.ok(copyFor(code).table.layers.x, `${code}: the pane layer has its name`)
+    for (const [key, text] of Object.entries(file)) if (key.startsWith('page.')) assert.ok(!/^(Changed only|변경 파일만)$/.test(text), `${code} ${key}`)
+  }
+})
