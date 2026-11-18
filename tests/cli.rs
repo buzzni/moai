@@ -7428,6 +7428,21 @@ fn config_json_fills_defaults_and_keeps_written_values() {
     assert!(human.contains("due_priority         = \"auto\""), "{human}");
 }
 
+/// `[vcs]` 표(moai-0d0s.s6g)는 `moai config` 에 안 선다 — 사람 화면도 `--json` 도 표가 없을 때와 바이트째 같고, 모르는
+/// 값(`"hg"`)도 명령을 안 세운다.
+#[test]
+fn config_does_not_show_the_vcs_table() {
+    let s = init("configvcs");
+    let file = s.path().join(".moai/config.toml");
+    let both = || (ok(s.path(), &["config"]), ok(s.path(), &["config", "--json"]));
+    std::fs::write(&file, "prefix = \"argos\"\n").unwrap();
+    let plain = both();
+    for value in ["\"svn\"", "\"git\"", "\"hg\""] {
+        std::fs::write(&file, format!("prefix = \"argos\"\n[vcs]\nbackend = {value}\n")).unwrap();
+        assert_eq!(both(), plain, "{value}");
+    }
+}
+
 /// `moai due apply` 는 기한이 부르는 만큼 **올리기만** 하고, 같은 쓰기에서 노트를 단다(moai-dr8a.1q4). 미리 보기는 아무것도
 /// 안 쓰고, 두 번 부르면 둘째는 아무것도 안 건드린다 — 감독이 회차마다 치는 동사라 헛 diff 를 내면 안 된다.
 #[test]

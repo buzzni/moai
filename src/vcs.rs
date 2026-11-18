@@ -1,6 +1,9 @@
 //! Read-only version-control operations shared by the CLI and the views.
 //!
-//! Only Git is recognised today; all paths passed to Git are literal pathspecs.
+//! Two backends: Git, and svn working copies ([`svn`], moai-0d0s). All paths passed to Git are literal pathspecs; svn
+//! is called only through [`crate::svn`], which runs its four read-only subcommands.
+
+mod svn;
 
 use crate::git;
 use std::collections::BTreeMap;
@@ -52,22 +55,43 @@ pub struct Patch {
     pub text: String,
     pub truncated: bool,
 }
-#[derive(Debug, Clone, Copy)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum Backend {
     Git,
+    Svn,
 }
 #[derive(Debug)]
 pub enum Error {
     Git(git::Error),
+    /// svn failed or could not start; its own `kind` (`no_svn`·`offline`·`failed`) is the machine's word. A caller's
+    /// budget running out is [`Error::Timeout`], never this.
+    Svn(crate::svn::Error),
+    /// `branch` is not served for this working copy (no known fork point). The reason says why.
+    NoBase(NoBase),
     Timeout,
     Limit,
     InvalidRevision,
     InvalidPath,
     Io(std::io::Error),
 }
+/// Why an svn working copy has no `branch` scope.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum NoBase {
+    /// The trunk·branches convention is not read yet: the reading and its reasons land with moai-0d0s.x27, which
+    /// replaces this variant.
+    Unread,
+}
 impl From<git::Error> for Error {
     fn from(e: git::Error) -> Self {
         Self::Git(e)
+    }
+}
+impl From<crate::svn::Error> for Error {
+    fn from(e: crate::svn::Error) -> Self {
+        match e {
+            crate::svn::Error::Timeout => Self::Timeout,
+            e => Self::Svn(e),
+        }
     }
 }
 impl From<std::io::Error> for Error {
@@ -76,8 +100,92 @@ impl From<std::io::Error> for Error {
     }
 }
 
+/// Which backends a root stands under — each read from the disk alone, no program run. Git: a `.git` (file or
+/// directory) in any ancestor, as before svn. svn: a `.svn` **directory** in any ancestor — a file of that name is no
+/// working copy.
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
+pub struct Detected {
+    pub git: bool,
+    pub svn: bool,
+}
+impl Detected {
+    #[allow(dead_code)] // moai-0d0s.qg0 (the surfaces' git·svn choice) uses this.
+    pub fn has(self, backend: Backend) -> bool {
+        match backend {
+            Backend::Git => self.git,
+            Backend::Svn => self.svn,
+        }
+    }
+    /// The backend when nobody chose one: Git whenever it is detected, so a Git checkout answers as it did before svn;
+    /// svn only when Git is not there.
+    pub fn default_backend(self) -> Option<Backend> {
+        if self.git {
+            Some(Backend::Git)
+        } else if self.svn {
+            Some(Backend::Svn)
+        } else {
+            None
+        }
+    }
+}
+pub fn detected(root: &Path) -> Detected {
+    Detected {
+        git: root.ancestors().any(|p| p.join(".git").exists()),
+        svn: root.ancestors().any(|p| p.join(".svn").is_dir()),
+    }
+}
+/// The default backend of `root` ([`Detected::default_backend`]). Where `.git` is found this is `Git`, as before svn.
 pub fn detect(root: &Path) -> Option<Backend> {
-    root.ancestors().any(|p| p.join(".git").exists()).then_some(Backend::Git)
+    detected(root).default_backend()
+}
+/// What people asked for, strongest first: `moai diff --vcs`, the window's or tab's choice, `.moai/config.toml`'s
+/// `[vcs] backend` ([`configured`]).
+#[allow(dead_code)] // moai-0d0s.qg0 (the surfaces' git·svn choice) uses this.
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
+pub struct Asked {
+    pub flag: Option<Backend>,
+    pub screen: Option<Backend>,
+    pub config: Option<Backend>,
+}
+/// **The one place the backend is chosen.** The strongest ask whose backend is detected wins; an ask for a backend
+/// that is not detected is passed over, and with none left the default answers. Pure: no disk, no program. A surface
+/// that must refuse an undetected `--vcs` asks [`Detected::has`] before it gets here.
+#[allow(dead_code)] // moai-0d0s.qg0 (the surfaces' git·svn choice) uses this.
+pub fn choose(found: Detected, asked: Asked) -> Option<Backend> {
+    [asked.flag, asked.screen, asked.config].into_iter().flatten().find(|b| found.has(*b)).or(found.default_backend())
+}
+#[allow(dead_code)] // moai-0d0s.qg0 (`--vcs`, the config warning) uses these.
+impl Backend {
+    /// The word a person writes for it — `[vcs] backend`, `--vcs`.
+    pub fn word(self) -> &'static str {
+        match self {
+            Backend::Git => "git",
+            Backend::Svn => "svn",
+        }
+    }
+    pub fn of_word(word: &str) -> Option<Backend> {
+        [Backend::Git, Backend::Svn].into_iter().find(|b| b.word() == word)
+    }
+}
+/// `.moai/config.toml`'s `[vcs] backend`, read where it is used — [`crate::config::Config::parse`] keeps the table as
+/// written, so a value it does not know never stops a command.
+#[allow(dead_code)] // moai-0d0s.qg0 (the surfaces' git·svn choice) uses this.
+#[derive(Debug, Clone, Default, PartialEq, Eq)]
+pub struct Configured {
+    pub backend: Option<Backend>,
+    /// The value as written when it is neither `"git"` nor `"svn"`; it then counts as not written, and the surface
+    /// says so in one line.
+    pub unknown: Option<String>,
+}
+/// Read `[vcs]` (the [`crate::config::Config::vcs`] rows). The last `backend` line wins, as a TOML reader's error
+/// would be worse than either.
+#[allow(dead_code)] // moai-0d0s.qg0 (the surfaces' git·svn choice) uses this.
+pub fn configured(table: &[crate::config::ModelEntry]) -> Configured {
+    let Some(row) = table.iter().rev().find(|e| e.key == "backend") else { return Configured::default() };
+    match row.word().and_then(Backend::of_word) {
+        Some(b) => Configured { backend: Some(b), unknown: None },
+        None => Configured { backend: None, unknown: Some(row.raw.clone()) },
+    }
 }
 fn hex(s: &str) -> bool {
     matches!(s.len(), 40 | 64) && s.bytes().all(|c| c.is_ascii_hexdigit())
@@ -338,6 +446,10 @@ fn timed<T: Send + 'static>(
 }
 impl Backend {
     pub fn changes(self, root: &Path, scope: &Scope, budget: Option<Duration>) -> Result<Changes, Error> {
+        match self {
+            Backend::Svn => return svn::changes(root, scope, budget),
+            Backend::Git => {}
+        }
         let root = root.to_path_buf();
         let scope = scope.clone();
         timed(budget, move || self.changes_inner(&root, &scope, budget))
@@ -433,6 +545,10 @@ impl Backend {
         path: Option<&str>,
         budget: Option<Duration>,
     ) -> Result<Patch, Error> {
+        match self {
+            Backend::Svn => return svn::patch(root, scope, path.map(|p| vec![p.to_owned()]), budget, None),
+            Backend::Git => {}
+        }
         self.patch_known(root, scope, path.map(|p| vec![p.to_owned()]), budget, None, true)
     }
     pub fn patch_with_changes(
@@ -443,6 +559,12 @@ impl Backend {
         budget: Option<Duration>,
         changes: &Changes,
     ) -> Result<Patch, Error> {
+        match self {
+            Backend::Svn => {
+                return svn::patch(root, scope, path.map(|p| vec![p.to_owned()]), budget, Some(untracked_of(changes)));
+            }
+            Backend::Git => {}
+        }
         self.patch_known(root, scope, path.map(|p| vec![p.to_owned()]), budget, Some(untracked_of(changes)), true)
     }
     /// The patch of some files and folders only — a folder is named with its trailing `/` and takes every file below
@@ -463,6 +585,10 @@ impl Backend {
     ) -> Result<Patch, Error> {
         if paths.is_empty() {
             return Err(Error::InvalidPath);
+        }
+        match self {
+            Backend::Svn => return svn::patch(root, scope, Some(paths.to_vec()), budget, changes.map(untracked_of)),
+            Backend::Git => {}
         }
         let folder = paths.iter().any(|p| p.ends_with('/'));
         let renames = !folder
@@ -569,6 +695,10 @@ impl Backend {
     }
     #[allow(dead_code)] // File search in the TUI and web will consume this.
     pub fn ignored_dirs(self, root: &Path, budget: Option<Duration>) -> Result<Vec<String>, Error> {
+        match self {
+            Backend::Svn => return svn::ignored_dirs(root, budget),
+            Backend::Git => {}
+        }
         let mut dirs = Vec::new();
         records(
             root,
@@ -861,6 +991,11 @@ impl Backend {
     /// `budget`. When the tree cannot be read, the list still gets its marks and the directories stand `M`; a directory
     /// the disk will not answer for stands `M` by itself.
     pub fn marks(self, root: &Path, changes: &Changes, budget: Option<Duration>) -> Marks {
+        // svn reads no facts for directories: they all stand `M`, which says less rather than something false.
+        match self {
+            Backend::Svn => return marks(changes, None),
+            Backend::Git => {}
+        }
         let candidates = ancestors(changes);
         if candidates.is_empty() {
             return marks(changes, None);

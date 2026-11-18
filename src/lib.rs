@@ -45,7 +45,6 @@ mod skill;
 mod snippet;
 pub mod store;
 pub mod style;
-#[allow(dead_code)] // moai-0d0s: 백엔드(moai-0d0s.s6g)가 붙기 전까지 svn 층을 부르는 자리가 없다. 붙는 멤버가 걷는다.
 mod svn;
 #[cfg(test)]
 mod test_shell;

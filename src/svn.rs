@@ -61,11 +61,19 @@ pub(crate) enum Arg<'a> {
     Path(&'a str),
     /// 저장소 URL. 리비전을 주면 `<URL>@<rev>`, 안 주면 빈 peg(`<URL>@`) 로 싼다 — URL 에 든 `@` 를
     /// svn 이 peg 로 읽지 않게.
+    #[allow(dead_code)] // moai-0d0s.4o8 (commits) and moai-0d0s.x27 (branch·whole) use this.
     Url(&'a str, Option<u64>),
     /// `--old=<URL>@<rev>` — URL 대 작업 사본 diff 의 옛 쪽.
+    #[allow(dead_code)] // moai-0d0s.4o8 (commits) and moai-0d0s.x27 (branch·whole) use this.
     Old(&'a str, u64),
     /// `--new=<뿌리 밑 경로>` — URL 대 작업 사본 diff 의 새 쪽.
+    #[allow(dead_code)] // moai-0d0s.4o8 (commits) and moai-0d0s.x27 (branch·whole) use this.
     New(&'a str),
+    /// 작업 사본 `diff` 의 대상 경로 — `./<경로>`, **끝에 `@` 를 안 붙인다**(moai-0d0s.s6g 실측, svn 1.14.3).
+    /// 작업 사본 대상의 `svn diff` 는 peg 를 안 읽는다: `./a@b` 는 그대로 `a@b` 고, `./m.txt@` 는 `@` 까지 이름으로
+    /// 읽어 `E155010: The node '…/m.txt@' was not found` 로 죽는다. `-` 로 시작하는 이름은 `./` 가 막는다.
+    /// `info`·`status` 의 경로는 [`Arg::Path`] 다.
+    Local(&'a str),
 }
 
 impl Arg<'_> {
@@ -140,6 +148,9 @@ pub(crate) fn command(root: &Path, sub: Sub, args: &[Arg]) -> std::process::Comm
             Arg::New(p) => {
                 cmd.arg(format!("--new={}", literal(p)));
             }
+            Arg::Local(p) => {
+                cmd.arg(format!("./{p}"));
+            }
         }
     }
     detach(&mut cmd);
@@ -171,7 +182,7 @@ fn utf8_locale(v: &std::ffi::OsStr) -> bool {
 /// 시험 빌드만 쓰는 svn 설정 자리. 사람의 홈에 `~/.subversion` 을 짓지 않는다.
 #[cfg(test)]
 fn config_dir() -> Option<std::path::PathBuf> {
-    Some(tests::config_dir())
+    Some(tests::config_override().unwrap_or_else(tests::config_dir))
 }
 
 #[cfg(not(test))]
@@ -357,6 +368,29 @@ pub(crate) mod tests {
         .clone()
     }
 
+    thread_local! {
+        static CONFIG: std::cell::RefCell<Option<PathBuf>> = const { std::cell::RefCell::new(None) };
+    }
+
+    pub(crate) fn config_override() -> Option<PathBuf> {
+        CONFIG.with(|c| c.borrow().clone())
+    }
+
+    /// `f` 안에서 이 층이 `dir` 을 `--config-dir` 로 준다 — **이 스레드에서만**(moai-0d0s.s6g). 한 시험이 심은
+    /// `diff-cmd` 가 같은 판의 다른 시험의 svn 에 닿지 않게. 시한을 주면 읽기가 다른 스레드에서 돌아 이것이 안 닿으니,
+    /// 안에서는 시한 없이 부른다.
+    pub(crate) fn with_config<T>(dir: &Path, f: impl FnOnce() -> T) -> T {
+        struct Reset;
+        impl Drop for Reset {
+            fn drop(&mut self) {
+                CONFIG.with(|c| *c.borrow_mut() = None);
+            }
+        }
+        CONFIG.with(|c| *c.borrow_mut() = Some(dir.to_path_buf()));
+        let _reset = Reset;
+        f()
+    }
+
     /// 시험이 svn 을 쓸 수 있는가에 대한 판정.
     #[derive(Debug, PartialEq, Eq)]
     pub(crate) enum Gate {
@@ -461,6 +495,7 @@ pub(crate) mod tests {
         }
 
         /// trunk 를 `branches/<name>` 으로 복사한다.
+        #[allow(dead_code)] // moai-0d0s.x27 uses this.
         pub(crate) fn branch(&self, name: &str) {
             let (from, to) = (format!("{}/trunk", self.url), format!("{}/branches/{name}", self.url));
             svn_in(&self.scratch, &["copy", "-q", "-m", &format!("branch {name}"), &from, &to]);

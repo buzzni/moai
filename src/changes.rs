@@ -42,6 +42,9 @@ pub struct Prepared {
 pub(crate) fn told(root: &Path, lang: crate::i18n::Lang, e: vcs::Error) -> git::Told {
     match e {
         vcs::Error::Git(e) => e.told(root, lang),
+        // moai-0d0s.s6g: svn's own words until the surfaces' lines land (moai-0d0s.qg0).
+        vcs::Error::Svn(e) => git::Told { kind: e.kind(), said: e.said() },
+        vcs::Error::NoBase(_) => git::Told { kind: "no_base", said: String::new() },
         vcs::Error::Io(e) => git::Error::Stream(e).told(root, lang),
         vcs::Error::Timeout => git::Told { kind: "timeout", said: crate::i18n::say(lang, "diff.timeout").to_owned() },
         vcs::Error::Limit => git::Told { kind: "failed", said: crate::i18n::say(lang, "diff.limit").to_owned() },
