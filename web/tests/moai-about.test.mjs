@@ -109,41 +109,21 @@ test('tips: the field test\'s sentences are all there, by kind, in Korean; Engli
   assert.deepEqual(copyFor('zh').shell.tips, en)
 })
 
-test('tips: the header turns through them every 8 s by CSS, from a random place, and a click opens the page', () => {
-  const dom = new JSDOM('<!doctype html><head></head><body></body>', { pretendToBeVisual: true })
-  const doc = dom.window.document
-  const tips = ['one', 'two', 'three', 'four']
-  let opened = 0
-  const brand = B.mountBrand(doc, en, { tips, label: 'All tips', open: () => opened++ })
-  doc.body.append(brand.el)
-  assert.equal(brand.el.querySelector('.m-brand-tip .m-brand-label').textContent, 'Tip     : ')
-  const items = [...brand.el.querySelectorAll('.m-brand-tip-item')]
-  assert.deepEqual(items.map((item) => item.querySelector('.m-brand-tip-said').textContent), tips, 'every tip, stacked in one place')
-  assert.ok(items.every((item) => item.querySelector('.m-brand-label').textContent === 'Tip     : '), 'each with its label, on its first line')
-  // Each takes its 8 s turn of a 32 s round; the one whose turn is first is marked to stand alone without motion.
-  const delays = items.map((item) => Number(item.style.animation.match(/linear (\d+)ms/)[1]))
-  assert.deepEqual([...delays].sort((a, b) => a - b), [0, 8000, 16000, 24000])
-  assert.ok(items.every((item) => item.style.animation.includes('m-tip-4 32000ms')))
-  assert.equal(items.find((item) => item.hasAttribute('data-first')).style.animation.includes('linear 0ms'), true)
-  const frames = doc.getElementById('m-tip-4').textContent
-  // 1.25% of a 32 s round is the 0.4 s fade; a tip fades out over the next one's fade in.
-  assert.equal(frames, '@keyframes m-tip-4 { 0% { opacity: 0; } 1.25% { opacity: 1; } 25% { opacity: 1; } 26.25%, 100% { opacity: 0; } }')
-  // One keyframe set per count, however many headers draw it.
-  B.mountBrand(doc, en, { tips, label: 'All tips', open() {} })
-  assert.equal(doc.querySelectorAll('style#m-tip-4').length, 1)
-  // Screen readers hear what the button does, not the stack.
-  assert.equal(brand.el.querySelector('.m-brand-tip-text').getAttribute('aria-label'), 'All tips')
-  // A click leaves the focus where it was, as on a project: on the button, SPC would click it again.
-  const press = new dom.window.MouseEvent('mousedown', { bubbles: true, cancelable: true })
-  brand.el.querySelector('.m-brand-tip-text').dispatchEvent(press)
-  assert.equal(press.defaultPrevented, true)
-  brand.el.querySelector('.m-brand-tip-text').click()
-  assert.equal(opened, 1)
-  // No timer at all: a shown document keeps none alive.
-  const scheduled = []
-  dom.window.setTimeout = (callback, ms) => { scheduled.push(ms); return 1 }
-  B.mountBrand(doc, en, { tips, label: 'All tips', open() {} })
-  assert.deepEqual(scheduled, [])
+test('the header has no tip line; the projects stand right after the info column, which takes only its own width', async () => {
+  const doc = new JSDOM('<!doctype html><body></body>').window.document
+  const brand = B.mountBrand(doc, en)
+  brand.render({ user: 'Raven <raven@buzzni.com>', version: '0.18.0', latest: null }, [{ name: 'a', path: '/a', number: 1, home: false, current: true }])
+  assert.equal(brand.el.querySelector('.m-brand-tip'), null)
+  assert.equal(brand.el.querySelector('.m-brand-tip-text'), null)
+  assert.equal(doc.querySelector('style[id^="m-tip-"]'), null)
+  assert.deepEqual([...brand.el.children].map((node) => node.className), ['m-brand-logo', 'm-brand-info', 'm-brand-projects'], 'projects right after info')
+  const { readFileSync } = await import('node:fs')
+  const css = readFileSync(new URL('../panel/style/shell.css', import.meta.url), 'utf8')
+  const rule = (selector) => css.match(new RegExp(`^${selector.replace('.', '\\.')} \\{([^}]*)\\}`, 'm'))[1]
+  assert.doesNotMatch(rule('.m-brand-info'), /flex:\s*1/, 'the info column must not take the spare width, or the projects go to the far edge')
+  assert.match(rule('.m-brand-info'), /flex:\s*0 1 auto/)
+  assert.match(rule('.m-brand-projects'), /padding-left:\s*2ch/, 'a gap between the columns')
+  assert.doesNotMatch(css, /m-brand-tip/, 'no leftover tip rules')
 })
 
 test('tips page: every tip with its Copy button; keys stay in it; Esc closes and gives the focus back', () => {

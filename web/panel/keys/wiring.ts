@@ -631,7 +631,7 @@ export function wireKeys(options: KeyWiringOptions): KeyWiring {
     },
     onChange: redraw,
   })
-  const help = createHelp(doc, { platform, words: copy.table })
+  const help = createHelp(doc, { platform, words: copy.table, tips: { label: copy.table.tips, open: () => shell.openTips() } })
   const hint = focusHint(doc, copy.keys.focusHint)
   hint.addEventListener("click", () => doc.body.focus({ preventScroll: true }))
   doc.body.append(menu.el, help.el, zones.el, hint)

@@ -45,6 +45,7 @@ mod skill;
 mod snippet;
 pub mod store;
 pub mod style;
+mod svn;
 #[cfg(test)]
 mod test_shell;
 mod text;

@@ -811,6 +811,18 @@ test('keys: an English panel draws the SPC menu and the help in English, with no
   assert.doesNotMatch(panel.$('.m-sort-pop').textContent, /[가-힣]/)
 })
 
+test('keys: the help\'s tips row opens the tips page in the shell (moai-q16k)', () => {
+  const panel = inEpic()
+  const tips = panel.$('.m-tips')
+  assert.equal(tips.hidden, true)
+  panel.press('?')
+  const row = panel.keys.help.el.querySelector('button.m-help-tips')
+  assert.equal(row.textContent, en.table.tips)
+  row.click()
+  assert.equal(panel.keys.help.isOpen(), false)
+  assert.equal(panel.$('.m-tips').hidden, false)
+})
+
 // ── read marks (moai-ly88): upstream's `r`, `SPC m a`, `SPC m g`, restored ──
 
 test('keys: r marks the cursor row read, SPC m a everything, SPC m g the group the list stands in; a refusal is told', async () => {

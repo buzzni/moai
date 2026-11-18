@@ -15,9 +15,6 @@ import { versionLine, type About, type VersionCopy } from '../data/about.ts'
 import type { ProjectEntry } from '../data/projects.ts'
 import { el } from './components.ts'
 
-/** How long one tip stands before the next (se-irhr). */
-export const TIP_MS = 8000
-
 /** The TUI's `LOGO`, letter for letter: the art, then the tagline. */
 export const LOGO = [
   '• ▌ ▄ ·.        ▄▄▄· ▪',
@@ -97,17 +94,7 @@ export const CURRENT = '▸ '
 /** `<n> ` before a numbered project; the width of `<9> ` in spaces before one without a number (draw.rs `numbered`). */
 export const projectKey = (number: number | null): string => (number === null ? ' '.repeat('<9> '.length) : `<${number}> `)
 
-/**
- * The tips the header turns through under the Version line, and what a click on one does (opens the tips page).
- * Without them the header is the TUI's alone.
- */
-export interface BrandTips {
-  tips: readonly string[]
-  label: string
-  open(): void
-}
-
-export function mountBrand(doc: Document, copy: VersionCopy, tips?: BrandTips, open?: (entry: ProjectEntry) => void): Brand {
+export function mountBrand(doc: Document, copy: VersionCopy, open?: (entry: ProjectEntry) => void): Brand {
   const lines = logoLines()
   const art = lines.slice(0, -1)
   const svg = doc.createElementNS(SVG, 'svg')
@@ -120,7 +107,6 @@ export function mountBrand(doc: Document, copy: VersionCopy, tips?: BrandTips, o
   const logo = el(doc, 'div', { class: 'm-brand-logo', 'aria-hidden': 'true' }, svg, el(doc, 'div', { class: 'm-brand-tagline' }, lines.at(-1)!))
   const told = el(doc, 'div', { class: 'm-brand-told' })
   const info = el(doc, 'div', { class: 'm-brand-info' }, told)
-  if (tips && tips.tips.length) info.append(tipLine(doc, tips))
   const projects = el(doc, 'nav', { class: 'm-brand-projects', 'aria-label': 'Projects', hidden: true })
   const node = el(doc, 'header', { class: 'm-brand', 'aria-label': 'moai' }, logo, info, projects)
   let drawn = ''
@@ -167,63 +153,4 @@ function projectEl(doc: Document, entry: ProjectEntry, open?: (entry: ProjectEnt
   // The keys stay where they were: a click must not leave the focus on the button, where SPC would click it again.
   node.addEventListener('mousedown', (event) => event.preventDefault())
   return node
-}
-
-/**
- * The tip under the Version line: one at a time, the next every {@link TIP_MS}, from a place picked at random so each
- * opening starts somewhere else; a click opens the page with all of them. The turning is CSS, not a timer: every tip
- * stands in the same place and a keyframe shows each for its own {@link TIP_MS} of the round ({@link tipKeyframes}).
- * So a panel no one sees turns nothing, the pointer on it holds it still (shell.css), and without motion the first
- * tip stands alone. Screen readers hear the button's name, not the stack.
- */
-function tipLine(doc: Document, tips: BrandTips): HTMLElement {
-  const n = tips.tips.length
-  const start = Math.floor(Math.random() * n)
-  if (n > 1) tipKeyframes(doc, n)
-  // Each tip carries its own label, so `Tip :` stands on the tip's first line however many lines it takes.
-  const items = tips.tips.map((tip, i) => {
-    const turn = (i - start + n) % n
-    const item = el(doc, 'span', { class: 'm-brand-tip-item', 'data-first': turn === 0 ? '' : null },
-      el(doc, 'span', { class: 'm-brand-label' }, `${pad('Tip', LABEL)} : `), el(doc, 'span', { class: 'm-brand-tip-said' }, tip))
-    // Through CSSOM, which the CSP's style-src lets through where a `style` attribute it would not.
-    if (n > 1) item.style.animation = `m-tip-${n} ${n * TIP_MS}ms linear ${turn * TIP_MS}ms infinite both`
-    return item
-  })
-  const text = el(doc, 'button', { type: 'button', class: 'm-brand-tip-text', title: tips.label, 'aria-label': tips.label }, ...items)
-  text.addEventListener('click', () => tips.open())
-  // The keys stay where they were, as on a project (projectEl): the tips page hands the focus back to what held it, and
-  // on this button SPC — the leader — would click it again and reopen the page instead of the menu.
-  text.addEventListener('mousedown', (event) => event.preventDefault())
-  // At the foot of the info column, so its last line stands on the tagline's row (shell.css).
-  return el(doc, 'div', { class: 'm-brand-tip' }, text)
-}
-
-/** The rounds already adopted into a document as sheets (a sheet has no id to look for). */
-const adopted = new WeakMap<Document, Set<string>>()
-
-/**
- * The round for `n` tips, once per document: shown for one `n`th of it. It fades out while the next fades in, so the
- * label both carry at the same place stays on the screen. `both` fill keeps a tip whose turn has not come hidden until
- * it does.
- */
-export function tipKeyframes(doc: Document, n: number): void {
-  const id = `m-tip-${n}`
-  if (doc.getElementById(id) || adopted.get(doc)?.has(id)) return
-  const shown = 100 / n
-  const fade = Math.min(shown / 4, (400 / (n * TIP_MS)) * 100)
-  const at = (v: number) => `${Number(v.toFixed(3))}%`
-  const rules = `@keyframes ${id} { 0% { opacity: 0; } ${at(fade)} { opacity: 1; } ${at(shown)} { opacity: 1; } ${at(shown + fade)}, 100% { opacity: 0; } }`
-  // A constructable sheet: the CSP's style-src 'self' refuses a `<style>` element made at run time but not a sheet made
-  // through CSSOM. The element stays for a document with no constructable sheets (jsdom), where there is no CSP.
-  const Sheet = doc.defaultView?.CSSStyleSheet
-  if (Sheet && 'adoptedStyleSheets' in doc) {
-    const sheet = new Sheet()
-    sheet.replaceSync(rules)
-    doc.adoptedStyleSheets = [...doc.adoptedStyleSheets, sheet]
-    adopted.get(doc)?.add(id) ?? adopted.set(doc, new Set([id]))
-    return
-  }
-  const style = el(doc, 'style', { id })
-  style.textContent = rules
-  doc.head.append(style)
 }

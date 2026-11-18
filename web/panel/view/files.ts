@@ -34,6 +34,8 @@ export function mountFiles(root: HTMLElement, ctx: ViewContext): PaneView {
   const content = el(doc, 'div', { class: 'm-files-content', tabindex: 0 })
   const bar = el(doc, 'div', { class: 'm-files-toolbar' })
   const checkoutSelect = el(doc, 'select', { 'aria-label': words.checkout })
+  /** Git or svn, where both stand over the repository (moai-0d0s.qg0): drawn only when `/api/checkouts` names both. */
+  const vcsSelect = el(doc, 'select', { 'aria-label': words.vcs })
   const changedButton = iconButton(doc, { icon: 'file-diff', label: stateLabel(words.changed, false, words), pressed: false })
   const diffButton = iconButton(doc, { icon: 'diff', label: stateLabel(words.diff, false, words), pressed: false })
   const detailButton = iconButton(doc, { icon: 'panel-right', label: stateLabel(words.detail, false, words), pressed: false })
@@ -61,7 +63,7 @@ export function mountFiles(root: HTMLElement, ctx: ViewContext): PaneView {
     const client = ctx.client, key = rootKey
     if (!client || key === undefined) { ticket.failed(ctx.copy.failed); return }
     const job = { live: () => ticket.live() && key === rootKey, async run() {
-      const read = await checkoutPatch(client, key, ticket.path, ticket.quiet)
+      const read = await checkoutPatch(client, key, ticket.path, ticket.quiet, vcsOf(key))
       if (key !== rootKey) return
       if (read.ok) ticket.done(read.value); else ticket.failed(failureWords(ctx.copy, read))
     } }
@@ -87,6 +89,17 @@ export function mountFiles(root: HTMLElement, ctx: ViewContext): PaneView {
   /** Changed-only: each directory's total of the `+N −M` below it, summed once when the tree is built. */
   let sums = new Map<string, { adds: number; dels: number }>()
   let alive = true, started = false, rootKey: string | undefined, checkouts: Checkout[] = [], changedOnly = false, diffOn = false, detailOn = false
+  /** The tab's git·svn pick — this tab's alone, never kept; undefined while the repository has one backend. */
+  let vcs: string | undefined
+  /**
+   * The checkout the pick belongs to: the one `/api/checkouts` calls current, the only one its `vcs` key speaks of. Another
+   * checkout may stand outside the svn working copy, and a pick it does not have is refused (400) on every read — so
+   * there the pick is not sent, the server chooses as it would with no control, and the control steps aside.
+   */
+  let vcsHome: string | undefined
+  const vcsField = el(doc, 'span', { class: 'm-files-field m-files-vcs' }, vcsSelect)
+  /** The pick to send with a read of `key`'s checkout, or undefined where the choice is not offered. */
+  const vcsOf = (key: string | undefined): string | undefined => key !== undefined && key === vcsHome ? vcs : undefined
   let groups: FileGroupTable | null = null, groupsBoot: unknown
   /** The checkout's change list as the server last gave it, read whenever this tab stands; the letters and the diff heads come from it. */
   let changes: Change[] = [], dirMarks = new Map<string, Mark>(), changeFp = '', changeError = '', changeNote = '', held: ChangeSet | null = null, changesPending: { key: string; read: Promise<ChangeSet | null>; background: boolean } | null = null, ordinary: Map<string, Entry[]> | null = null, stateNow: State | null = null, indexNow: IssueIndex | null = null
@@ -124,7 +137,7 @@ export function mountFiles(root: HTMLElement, ctx: ViewContext): PaneView {
   const watchChanged = () => root.dispatchEvent(new doc.defaultView!.Event('moai-file-watch', { bubbles: true }))
   async function switchCheckout(key: string): Promise<void> {
     if (!checkouts.some(c => c.key === key)) return
-    generation++; diffEpoch++; issueEpoch++; clearTimeout(timer); rootKey = key; chosen = ''; cursor = 0; base = '.'; matches = null; clearChanges(); ordinary = null; changedOnly = false; releaseDiff()
+    generation++; diffEpoch++; issueEpoch++; clearTimeout(timer); rootKey = key; vcsField.hidden = vcsOf(key) === undefined; chosen = ''; cursor = 0; base = '.'; matches = null; clearChanges(); ordinary = null; changedOnly = false; releaseDiff()
     directories.clear(); partial.clear(); stamps.clear(); readTimes.clear(); fileStamp = null; fileReadAt = 0; lastFile = null; dropPatches();  expanded.clear(); expanded.add('.'); content.replaceChildren(); contentPath.textContent = ''; diff.clear(); draw(); paintRight()
     void ensureChanges(key).then(set => { if (set && key === rootKey && !changedOnly) draw(rows[cursor]?.path) })
     try { await load('.'); if (rootKey === key) { draw(); if (diffOn) void showDiff().catch(() => {}) } } catch { message.textContent = words.directoryError; const current = checkouts.find(c => c.current); if (current && current.key !== key) { checkoutSelect.value = current.key; void switchCheckout(current.key) } }
@@ -152,7 +165,7 @@ export function mountFiles(root: HTMLElement, ctx: ViewContext): PaneView {
     if (!source || key !== rootKey) return Promise.resolve(null)
     if (held) return Promise.resolve(held)
     if (changesPending?.key === key && (!changesPending.background || background)) return changesPending.read
-    const read: Promise<ChangeSet | null> = source.changes(key, background).then(set => { if (key !== rootKey) return null; applyChanges(set); return set }, () => null)
+    const read: Promise<ChangeSet | null> = source.changes(key, background, vcsOf(key)).then(set => { if (key !== rootKey) return null; applyChanges(set); return set }, () => null)
       .finally(() => { if (changesPending?.read === read) changesPending = null })
     changesPending = { key, read, background }
     return read
@@ -207,6 +220,8 @@ export function mountFiles(root: HTMLElement, ctx: ViewContext): PaneView {
     diff.list({ files: changes.filter(change => under ? change.path.startsWith(under) : change.path === row.path), truncated: false }, background)
   }
   checkoutSelect.addEventListener('change', () => void switchCheckout(checkoutSelect.value))
+  // Another backend is another reading of the same checkout: everything read goes, as a checkout switch does.
+  vcsSelect.addEventListener('change', () => { vcs = vcsSelect.value; if (rootKey !== undefined) void switchCheckout(rootKey) })
   // `SPC w` puts the focus here, and the select's type-ahead would let the next letter switch the checkout: an old
   // hand's `SPC w w` (the pane move before `SPC x`), and every worktree branch starts `worktree-`. So no letter
   // reaches it; choosing is the arrows and Enter, or a click.
@@ -346,7 +361,7 @@ export function mountFiles(root: HTMLElement, ctx: ViewContext): PaneView {
       for (const row of rows) expanded.delete(row.path)
       draw(); return
     }
-    const ignored = await source.ignored(rootKey).catch(() => [])
+    const ignored = await source.ignored(rootKey, vcsOf(rootKey)).catch(() => [])
     const pending = [base]; let count = 0
     while (pending.length && count < 5000) {
       const dir = pending.pop()!
@@ -365,7 +380,7 @@ export function mountFiles(root: HTMLElement, ctx: ViewContext): PaneView {
     if (!source || !q) return
     const current = ++generation
     try {
-      const result = await source.search(q, base, rootKey); if (current !== generation) return
+      const result = await source.search(q, base, rootKey, vcsOf(rootKey)); if (current !== generation) return
       matches = result
       for (const hit of result.matches) {
         const parts = hit.path.split('/'); parts.pop(); let dir = '.'
@@ -390,7 +405,10 @@ export function mountFiles(root: HTMLElement, ctx: ViewContext): PaneView {
       split.setWidth(root.clientWidth); split.setRatio('right', state.filesRatio)
       inner.setPosition(state.detail.position === 'left' || state.detail.position === 'right' ? 'left' : 'top'); inner.setWidth(root.clientWidth)
       diff.setLayout(state.diffLayout); diff.setWidth(root.clientWidth); paintRight()
-      if (!started) { started = true; void source?.checkouts().then(list => { checkouts = [...list].sort((a, b) => Number(b.main) - Number(a.main)); checkoutSelect.replaceChildren(...checkouts.map(c => el(doc, 'option', { value: c.key }, `${c.branch || c.key}${c.branch ? ` (${c.key})` : ''}${c.issue ? ` · ${c.issue}` : ''}`)));
+      if (!started) { started = true; void source?.checkouts().then(({ list, vcs: choice }) => {
+        checkouts = [...list].sort((a, b) => Number(b.main) - Number(a.main))
+        if (choice) { vcs = choice.fallback; vcsHome = checkouts.find(c => c.current)?.key; vcsSelect.replaceChildren(...choice.found.map(word => el(doc, 'option', { value: word }, word))); vcsSelect.value = vcs; bar.insertBefore(vcsField, bar.children[1] ?? null) }
+        checkoutSelect.replaceChildren(...checkouts.map(c => el(doc, 'option', { value: c.key }, `${c.branch || c.key}${c.branch ? ` (${c.key})` : ''}${c.issue ? ` · ${c.issue}` : ''}`)));
         if (ctx.client) for (const checkout of checkouts) if (checkout.issue) void loadDetail(ctx.client, checkout.issue).then(result => {
           const option = [...checkoutSelect.options].find(o => o.value === checkout.key)
           if (option && result.ok && typeof result.value.title === 'string') option.textContent = `${checkout.branch || checkout.key}${checkout.branch ? ` (${checkout.key})` : ''} · ${result.value.title}`
@@ -439,7 +457,7 @@ export function mountFiles(root: HTMLElement, ctx: ViewContext): PaneView {
       return { key: `files:${rootKey}`, root: rootKey, dirs: changedOnly ? [] : [base, ...rows.filter(row => expanded.has(row.path)).map(row => row.path)].filter(dir => directories.has(dir)).map(path => ({ path, stamp: stamps.get(path) ?? null, readAt: readTimes.get(path) })),
         ...((chosen && (contentShown || diffShown)) ? { file: { path: chosen, stamp: fileStamp, readAt: fileReadAt } } : {}),
         // Always: the letters stand whether or not changed-only or the diff pane is on. '' until the first read lands, so that answer reads as a change.
-        changeKey: `root:${rootKey}`, changeFingerprint: changesLoaded ? changeFp : '' }
+        changeKey: vcsOf(rootKey) === undefined ? `root:${rootKey}` : JSON.stringify(['root', rootKey, vcsOf(rootKey), false]), changeFingerprint: changesLoaded ? changeFp : '' }
     },
     async refreshFileStamps(watch: FileWatch, dirs: string[], file: boolean, answer?: StampAnswer) {
       const key = rootKey; if (!source || watch.key !== `files:${key}`) return

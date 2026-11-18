@@ -588,11 +588,14 @@ async function start(): Promise<void> {
     async changes(watch) {
       if (!watch.changeKey) return ''
       let query: Record<string, string>
-      if (watch.changeKey.startsWith('root:')) query = { root: watch.changeKey.slice(5) }
+      let whole = watch.changeKey.startsWith('root:')
+      if (whole) query = { root: watch.changeKey.slice(5) }
       else {
         const [kind, id, scope, overlay] = JSON.parse(watch.changeKey) as [string, string, string, boolean]
-        if (kind !== 'issue') throw new Error('invalid change key')
-        query = { id, scope, ...(overlay ? { worktree: '1' } : {}) }
+        // A checkout read with the files tab's git·svn pick (moai-0d0s.qg0): `[root, key, vcs]`.
+        if (kind === 'root') { whole = true; query = { root: id, vcs: scope } }
+        else if (kind !== 'issue') throw new Error('invalid change key')
+        else query = { id, scope, ...(overlay ? { worktree: '1' } : {}) }
       }
       const result = await client.request({ path: '/api/changes', query }, { priority: PRIORITY.background, share: false, group: 'files-refresh' })
       if (result.kind !== 'passed' || typeof result.output !== 'object' || result.output === null || !Array.isArray((result.output as { files?: unknown }).files)) throw new Error('changes failed')
@@ -600,7 +603,7 @@ async function start(): Promise<void> {
       // A checkout's tab stands on the whole answer — the directories' letters, the cap, a checkout git cannot read — so the
       // fingerprint is the whole of it: a letter that moves alone is a change, and a git-less checkout is one steady answer
       // (not a failure the step would retry and flag on every round). An issue's pane stands on its files and their errors.
-      if (watch.changeKey.startsWith('root:')) {
+      if (whole) {
         const set = changeSetOf(value)
         if (!set) throw new Error('invalid changes')
         return changeFingerprint(set)

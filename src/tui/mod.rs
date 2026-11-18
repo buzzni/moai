@@ -18071,7 +18071,7 @@ mod tests {
             go_to(&mut a, "argos-0009");
             settle(&mut a);
             let repo = a.site.repo.clone().unwrap();
-            let cli = crate::changes::offers(&repo, &a.site.issues, "argos-0009", None, EN)
+            let cli = crate::changes::offers(&repo, &a.site.issues, "argos-0009", None, EN, None)
                 .read(None, None, false, None)
                 .expect("moai diff refused");
             let (offers, at) = a.diff.offers();

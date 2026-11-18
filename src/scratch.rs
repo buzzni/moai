@@ -213,8 +213,8 @@ pub fn inside_checkout(dir: &Path) -> bool {
 }
 
 /// 디렉터리에 선 이름들, 이름 차례로 — 찌꺼기를 세는 시험들(`store`·`cmd::skill`)이 함께 쓴다. 저마다 베껴 두던 것을
-/// 모았다(리뷰 moai-dj4j.n9y) — 부르는 시험이 다 유닉스의 것이라 여기도 그렇다(밖에서는 쓰는 이가 없어 죽은 글이 된다).
-#[cfg(unix)]
+/// 모았다(리뷰 moai-dj4j.n9y). 유닉스에만 서던 것을 모든 플랫폼에 세운다 — svn 캐시 시험(`svn`·`svn::cache`)이 윈도에서도
+/// 불러, 유닉스로 가르면 윈도의 시험 빌드가 통째로 안 선다(v1.5.0 PR #90 의 윈도 CI).
 pub fn names(d: &Path) -> Vec<String> {
     let mut v: Vec<String> =
         std::fs::read_dir(d).unwrap().map(|e| e.unwrap().file_name().into_string().unwrap()).collect();
