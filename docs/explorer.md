@@ -276,6 +276,7 @@ edits, stages, or commits anything. `Esc` closes it and the list is restored as 
   the window is open, the view falls back to the main checkout with a notification.
   Over the file window, `SPC v w` is inactive, leaving the issue list's worktree overlay unchanged.
   In [`keys.toml`](#change-the-keys), this action is configured as `checkout` under `[browse]`; elsewhere, `SPC w` is silent.
+  Where both a `.git` and a `.svn` are found, the menu gains two rows, `version control git` and `version control svn`; the pick is that window's own. Marks, changed files only and diffs then come from the chosen one, and a single backend leaves the menu as it was. See [svn working copies](svn.md).
 - **`SPC v c` shows changed files only** — changes on the checkout branch since
   forking, including uncommitted and untracked files (on the main checkout, all uncommitted
   modifications). The tree expands all containing folders, with each row prefixed by its
@@ -318,6 +319,7 @@ active panes, and dragging the divider adjusts the allocated space.
 - **One scope at a time.** The title lists available scopes with the active scope bracketed,
   along with branch ownership and file counts. When the pane is focused, `l` advances to the next scope and `h` returns to the previous
   scope.
+  In a svn working copy that is not on trunk or `branches/<name>`, or a branch not copied from anywhere, `branch` is not offered and the title says so; see [svn working copies](svn.md#the-four-scopes).
 - **Files.** Each file entry begins with a header line — displaying its mark, the file
   tree's matching letter and colour, file path (`old → new` for renames), and `+added −removed` — followed by its diff hunks.
   `Tab` and `Shift-Tab` navigate to the next and previous files. Binary files and

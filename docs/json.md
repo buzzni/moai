@@ -173,7 +173,20 @@ own; on `moai status --json` the `due_priority_behind` notice carries it per id 
 
 ## Read an issue's changes
 
-`moai diff <id> --json` returns one object with `id`, the selected `scope` (`commits`, `branch`, `working`, or `null`), `offers`, `files`, `total`, and `truncated`. Offers are in selection order and carry `scope`, checkout key, branch, and owner. A `vcs_error` object with `kind` and `said` appears only when Git could not be read.
+`moai diff <id> --json` returns one object with `id`, the selected `scope` (`commits`, `branch`, `working`, or `null`), `offers`, `files`, `total`, and `truncated`. Offers are in selection order and carry `scope`, checkout key, branch, and owner. A `vcs_error` object with `kind` and `said` appears only when the version control system (git or [svn](svn.md)) could not be read. Branch on `kind`; `said` is a line for people:
+
+| `kind` | Backend | Meaning |
+|---|---|---|
+| `no_git` | git | `git` is not installed |
+| `not_a_repo` | git | the directory is not inside a git repository |
+| `stream`, `encoding` | git | git's output could not be read, or was not UTF-8 |
+| `no_svn` | svn | `svn` is not installed; Subversion 1.9 or later is needed |
+| `offline` | svn | the repository server cannot be reached, or did not answer within the 30 seconds `moai diff` allows |
+| `no_base` | svn | the scope needs a fork point this working copy does not have |
+| `timeout` | both | the time allowed ran out; for svn it also means the revision table is still being filled, and the next call goes on |
+| `failed` | both | any other failure, with the tool's own words in `said` |
+
+`--vcs git|svn` chooses the backend where both are found. The keys of the response are the same for both.
 
 Each file has `path`, `old_path`, `status`, `adds`, `dels`, `binary`, and `hunks`. A hunk has `old_start`, `old_len`, `new_start`, `new_len`, `section`, and `lines`; each line has `kind`, `old_no`, `new_no`, `text`, and `no_newline`. Counts and line numbers may be `null`. `--stat` omits `hunks`; `total` counts files before the 5,000-file limit, and `truncated` also reports a limited patch.
 
