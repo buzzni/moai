@@ -13563,3 +13563,17 @@
 {"ts":"2026-11-17T22:43:40Z","id":"moai-dy7a.vc8","kind":"note","by":"레이븐","by_email":"raven@buzzni.com","text":"model: anthropic/sonnet-5.5 (medium — 목록 줄과 트리 선)"}
 {"ts":"2026-11-17T22:43:40Z","id":"moai-dy7a.06d","kind":"note","by":"레이븐","by_email":"raven@buzzni.com","text":"model: anthropic/sonnet-5.5 (medium — 도구줄과 diff 칸 룩앤필)"}
 {"ts":"2026-11-17T22:43:40Z","id":"moai-dy7a","kind":"note","by":"레이븐","by_email":"raven@buzzni.com","text":"Report-checked: ce51ff8bcad879fee5ade02d99c927f0c919ec9b"}
+{"ts":"2026-11-18T01:51:32Z","id":"moai-5tgg","kind":"create","by":"레이븐","by_email":"raven@buzzni.com","title":"웹 이슈 목록의 diff 칸이 detail 높이에 갇힌다"}
+{"ts":"2026-11-18T01:52:28Z","id":"moai-5tgg","kind":"status","by":"레이븐","by_email":"raven@buzzni.com","from":"todo","to":"in_progress"}
+{"ts":"2026-11-18T01:52:29Z","id":"moai-5tgg","kind":"note","by":"레이븐","by_email":"raven@buzzni.com","text":"Sent: subagent a4ebf9dba1c4909d3"}
+{"ts":"2026-11-18T01:56:55Z","id":"moai-5tgg.4h4","kind":"create","by":"레이븐","by_email":"raven@buzzni.com","title":"review — web detail+diff inner split height"}
+{"ts":"2026-11-18T01:56:59Z","id":"moai-5tgg","kind":"status","by":"레이븐","by_email":"raven@buzzni.com","from":"in_progress","to":"review"}
+{"ts":"2026-11-18T01:57:00Z","id":"moai-5tgg.4h4","kind":"status","by":"레이븐","by_email":"raven@buzzni.com","from":"todo","to":"in_progress"}
+{"ts":"2026-11-18T01:57:26Z","id":"moai-5tgg.4h4","kind":"note","by":"레이븐","by_email":"raven@buzzni.com","text":"Reviewer (code-review medium): no defects, no fixes applied. Checked wiki/files panes unaffected; noted the new test only regex-matches CSS text (matches sibling tests). Not run in browser by reviewer."}
+{"ts":"2026-11-18T01:57:27Z","id":"moai-5tgg.4h4","kind":"note","by":"레이븐","by_email":"raven@buzzni.com","text":"model: anthropic/sonnet-5.5 (medium — epic-end review of one CSS rule)"}
+{"ts":"2026-11-18T01:57:33Z","id":"moai-5tgg","kind":"note","by":"레이븐","by_email":"raven@buzzni.com","text":"Report-checked: pending"}
+{"ts":"2026-11-18T01:57:37Z","id":"moai-5tgg.4h4","kind":"status","by":"레이븐","by_email":"raven@buzzni.com","from":"in_progress","to":"done","note":"No findings; nothing to take in."}
+{"ts":"2026-11-18T01:57:38Z","id":"moai-5tgg","kind":"status","by":"레이븐","by_email":"raven@buzzni.com","from":"review","to":"done"}
+{"ts":"2026-11-18T01:57:38Z","id":"moai-5tgg","kind":"note","by":"레이븐","by_email":"raven@buzzni.com","text":"Next: nothing — merged into milestone/moai-w47s. Ignore the stray \"Report-checked: pending\" note above: it was written by mistake, no report has been checked."}
+{"ts":"2026-11-18T01:58:03Z","id":"moai-5tgg","kind":"note","by":"레이븐","by_email":"raven@buzzni.com","text":"model: anthropic/sonnet-5.5 (medium — 웹 diff 칸 높이 CSS 한 규칙)"}
+{"ts":"2026-11-18T01:58:03Z","id":"moai-5tgg","kind":"note","by":"레이븐","by_email":"raven@buzzni.com","text":"Report-checked: 435a9c5d merge into milestone/moai-w47s — the earlier \"Report-checked: pending\" note was the worker's slip, not a check"}
