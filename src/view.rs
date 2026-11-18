@@ -4461,6 +4461,37 @@ mod tests {
         Config::parse("prefix = \"argos\"\n").unwrap()
     }
 
+    /// **svn 의 다음 파일 머리는 지운·더한 줄 색으로 안 칠한다**(moai-0d0s.pz1) — `Index:` 가 헝크를 끝낸다.
+    /// 안 끝내면 둘째 파일의 `--- b.txt`·`+++ b.txt` 가 앞 헝크의 줄로 읽혀 빨강·초록이 된다. git 의 꼴은 그대로다.
+    #[test]
+    fn svn_file_headers_after_a_hunk_are_not_painted_as_changes() {
+        let answer = |patch: &str| crate::changes::Answer {
+            id: "x".into(),
+            scope: None,
+            offers: Vec::new(),
+            files: Vec::new(),
+            total: 0,
+            truncated: false,
+            vcs_error: None,
+            patch: patch.into(),
+        };
+        let lines = |patch: &str| {
+            diff_output(&answer(patch), false).join("\n").split('\n').map(str::to_owned).collect::<Vec<_>>()
+        };
+        let svn = "Index: a.txt\n====\n--- a.txt\t(revision 2)\n+++ a.txt\t(working copy)\n@@ -1 +1,2 @@\n a\n+b\nIndex: b.txt\n====\n--- b.txt\t(revision 2)\n+++ b.txt\t(working copy)\n@@ -1 +0,0 @@\n-c\n";
+        let got = lines(svn);
+        assert_eq!(got[6], crate::style::paint(crate::style::DONE, "+b"));
+        assert_eq!(got[9], crate::style::paint(crate::style::PLAIN, "--- b.txt\t(revision 2)"));
+        assert_eq!(got[10], crate::style::paint(crate::style::PLAIN, "+++ b.txt\t(working copy)"));
+        assert_eq!(got[12], crate::style::paint(crate::style::ERROR, "-c"));
+        let git = "diff --git a/a b/a\n--- a/a\n+++ b/a\n@@ -1 +1 @@\n-x\n+y\n Index: z\n";
+        let got = lines(git);
+        assert_eq!(got[1], crate::style::paint(crate::style::PLAIN, "--- a/a"));
+        assert_eq!(got[4], crate::style::paint(crate::style::ERROR, "-x"));
+        assert_eq!(got[5], crate::style::paint(crate::style::DONE, "+y"));
+        assert_eq!(got[6], crate::style::paint(crate::style::PLAIN, " Index: z"));
+    }
+
     /// 내 것이 아닌 줄이 없는 `ready` — 가르기 전의 화면이다.
     fn no_others() -> Others<'static, 'static> {
         Others { rows: &[], more: 0, naming: crate::config::Naming::Full, column: "in_progress", from: "todo" }

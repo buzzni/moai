@@ -119,21 +119,13 @@ pub fn unquote(path: &str) -> String {
 }
 fn path(s: &str, prefix: &str) -> Option<String> {
     let p = unquote(s.split('\t').next().unwrap_or(s));
-    if p == "/dev/null" {
-        None
-    } else {
-        Some(p.strip_prefix(prefix).unwrap_or(&p).to_owned())
-    }
+    if p == "/dev/null" { None } else { Some(p.strip_prefix(prefix).unwrap_or(&p).to_owned()) }
 }
 /// svn writes the path raw (no `a/` prefix, no quotes); a trailing `(nonexistent)` tab field means the side is absent.
 fn svn_path(s: &str) -> Option<String> {
     let mut fields = s.split('\t');
     let first = fields.next().unwrap_or(s);
-    if fields.next_back() == Some("(nonexistent)") {
-        None
-    } else {
-        Some(first.to_owned())
-    }
+    if fields.next_back() == Some("(nonexistent)") { None } else { Some(first.to_owned()) }
 }
 fn header_paths(s: &str) -> (Option<String>, Option<String>) {
     if s.starts_with('"') {
