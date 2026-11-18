@@ -110,6 +110,6 @@ When the server cannot be reached the `commits` scope is still offered, but read
 ## Known limits
 
 - A diff of a URL against a working copy fails as a whole when a versioned file is missing from disk (`!` in `svn status`), and when the working copy is a subdirectory of a branch that did not exist at the fork point. Both are reported as `failed`, with svn's own words. A list with files left out would be wrong, so none is given.
-- With a `.git` and a `.svn` in the same tree, reading as svn lists `.git/**` as untracked, and reading as git lists `.svn/**`.
+- With a `.git` and a `.svn` in the same tree, reading as git lists `.svn/**` as untracked. Reading as svn leaves out every unversioned `.git`, directory or file, at any depth.
 - A branch deleted and made again under the same name keeps the fork point of the first until the cache file is deleted.
 - Not supported: reading renames or copies as such, property changes, `svn:externals`, `tags` as branches, the commits section of `moai show` and the explorer's commit table, and every write.

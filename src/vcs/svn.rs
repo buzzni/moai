@@ -9,7 +9,8 @@
 //!   is opened with `info --depth infinity`, which does give kinds — an `svn rm`'d directory is reported as that one
 //!   line, its files are not. A copied (`svn mv`'d) directory is opened the same way: its unmodified files are not in
 //!   `status` either, while `diff --show-copies-as-adds` prints each as added
-//! - `status` does not walk an unversioned directory; [`walk`] does, without following links and skipping `.svn`
+//! - `status` does not walk an unversioned directory; [`walk`] does, without following links and skipping `.svn` and
+//!   `.git` ([`in_git`])
 //! - entries in a changelist stand under `<changelist>`, not `<target>`
 //! - a root that is not versioned answers `status` with exit 0 — a warning, or `.` as unversioned — so that case is
 //!   asked of `info`, which fails
@@ -447,6 +448,9 @@ fn list(root: &Path, deadline: &Deadline) -> Result<Listing, Error> {
     let mut unversioned = Vec::new();
     for e in entries {
         let Some(path) = clean(&e.path) else { continue };
+        if e.item == "unversioned" && in_git(&path) {
+            continue;
+        }
         let dir = super::dir_on_disk(root, &path) == Some(true);
         let status = if e.tree_conflicted {
             Status::Conflicted
@@ -536,8 +540,17 @@ fn opened(root: &Path, open: &[(String, Status)], listing: &mut Listing, deadlin
     Ok(())
 }
 
+/// Whether an unversioned path is, or stands inside, a `.git` (any case) — a Git checkout's own data, which the svn
+/// read never lists or opens (epic-end review, worker check A). With both found and svn chosen, `status` reports `.git`
+/// as one unversioned directory (svn's default `global-ignores` does not name it), and walking it put Git's objects in
+/// the list, opened each one to count its lines and appended them to `whole`·`working` patches. A Git worktree's `.git`
+/// file is skipped the same way. Git's own read, which lists `.svn/**`, is not changed: its output stays byte for byte.
+fn in_git(path: &str) -> bool {
+    path.split(['/', '\\']).any(|c| c.eq_ignore_ascii_case(".git"))
+}
+
 /// The files below an unversioned directory, which `status` reports as one line: every component opened without
-/// following a link, `.svn` skipped, inside the deadline. svn's ignore rules are not applied here.
+/// following a link, `.svn` and `.git` skipped, inside the deadline. svn's ignore rules are not applied here.
 #[cfg(unix)]
 fn walk(root: &Path, top: &str, deadline: &Deadline) -> Result<Vec<String>, Error> {
     use std::ffi::CString;
@@ -570,7 +583,7 @@ fn walk(root: &Path, top: &str, deadline: &Deadline) -> Result<Vec<String>, Erro
             deadline.check()?;
             let Some(name) = entry.name.to_str() else { continue };
             let path = format!("{relative}/{name}");
-            if !valid(&path) {
+            if !valid(&path) || in_git(name) {
                 continue;
             }
             if entry.mode & libc::S_IFMT == libc::S_IFDIR {
@@ -593,7 +606,7 @@ fn walk(root: &Path, top: &str, deadline: &Deadline) -> Result<Vec<String>, Erro
             deadline.check()?;
             let Some(name) = entry.file_name().to_str().map(str::to_owned) else { continue };
             let path = format!("{relative}/{name}");
-            if !valid(&path) {
+            if !valid(&path) || in_git(&name) {
                 continue;
             }
             // `file_type` does not follow a link: a link to a directory is listed, never walked.
@@ -934,6 +947,50 @@ mod tests {
         assert_eq!(choose(all, order), Some(Backend::Git), "the screen beats the file");
         assert_eq!(choose(Detected::default(), svn_asked), None);
         assert!(all.has(Backend::Svn) && !git_only.has(Backend::Svn));
+    }
+
+    /// **A Git checkout's `.git` is never listed or opened by the svn read** (epic-end review, worker check A): with both
+    /// found and svn chosen, neither the root's `.git` (a real repository, objects and all), nor one inside an
+    /// unversioned directory, nor a worktree's `.git` file is a row or a patch section — at any depth, in any case. Git's
+    /// read of the same tree still lists `.svn/**`, as it did.
+    #[test]
+    fn svn_chosen_beside_git_lists_nothing_under_git() {
+        if !svn_ready() {
+            return;
+        }
+        let (_repo, wc) = working_copy("vcs-svn-beside-git");
+        crate::git::tests::run_git(&wc, None, &["init", "-q"]);
+        crate::git::tests::run_git(&wc, None, &["commit", "-q", "--allow-empty", "-m", "git side"]);
+        fs::create_dir_all(wc.join("loose/inner/.git/objects")).unwrap();
+        fs::write(wc.join("loose/inner/.git/objects/blob"), "GIT OBJECT\n").unwrap();
+        fs::write(wc.join("loose/inner/f"), "kept\n").unwrap();
+        fs::create_dir_all(wc.join("wt")).unwrap();
+        fs::write(wc.join("wt/.GIT"), "gitdir: /elsewhere\n").unwrap();
+        fs::write(wc.join("wt/g"), "kept too\n").unwrap();
+        fs::write(wc.join("m.txt"), "changed\n").unwrap();
+        use super::super::{Asked, Detected, choose, detected};
+        let found = detected(&wc);
+        assert_eq!(found, Detected { git: true, svn: true });
+        assert_eq!(choose(found, Asked { config: Some(Backend::Svn), ..Asked::default() }), Some(Backend::Svn));
+        let before = admin_snapshot(&wc);
+        let git_dir = |p: &str| p.split('/').any(|c| c.eq_ignore_ascii_case(".git"));
+        for scope in [Scope::Working, Scope::Whole] {
+            let c = Backend::Svn.changes(&wc, &scope, None).unwrap();
+            let names: Vec<_> = c.files.iter().map(|f| f.path.as_str()).collect();
+            assert!(!names.iter().any(|p| git_dir(p)), "{scope:?}: {names:?}");
+            for kept in ["loose/inner/f", "wt/g", "m.txt"] {
+                assert!(names.contains(&kept), "{scope:?}: {kept} is missing from {names:?}");
+            }
+            let p = Backend::Svn.patch_with_changes(&wc, &scope, None, None, &c).unwrap();
+            assert!(!p.text.contains(".git") && !p.text.contains(".GIT") && !p.truncated, "{scope:?}: {}", p.text);
+            assert!(!p.text.contains("GIT OBJECT") && !p.text.contains("gitdir"), "{scope:?}: {}", p.text);
+            let unasked = Backend::Svn.patch(&wc, &scope, None, None).unwrap();
+            assert_eq!(unasked.text, p.text, "{scope:?}");
+        }
+        assert_eq!(admin_snapshot(&wc), before, ".svn changed");
+        // Git's read is untouched: it lists svn's own data as it always did.
+        let git = Backend::Git.changes(&wc, &Scope::Working, None).unwrap();
+        assert!(git.files.iter().any(|f| f.path.starts_with(".svn/")), "{git:?}");
     }
 
     #[test]
