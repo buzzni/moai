@@ -907,6 +907,17 @@ mod tests {
     use super::*;
     use crate::git::tests::run_git;
     use std::fs;
+    /// A name with a control character, spelled as the platform can make it. The newline is the hard case — git quotes
+    /// it in a patch header even under `core.quotePath=false` — and Unix takes it; Windows takes no control character
+    /// in a name, so there a space stands in for each and the rest (Hangul, a leading `-`) still has to come through
+    /// git untouched.
+    fn hostile(unix: &str) -> String {
+        if cfg!(windows) {
+            unix.chars().map(|c| if c.is_control() { ' ' } else { c }).collect()
+        } else {
+            unix.to_owned()
+        }
+    }
     #[test]
     fn working_changes_and_literal_paths() {
         let dir = crate::scratch::Scratch::new("vcs-working");
@@ -1135,16 +1146,17 @@ mod tests {
         let root: &Path = &dir;
         let git = |args: &[&str]| run_git(root, None, args);
         git(&["init", "-q"]);
-        fs::write(root.join("한글\nname"), "before\n").unwrap();
+        let name = hostile("한글\nname");
+        fs::write(root.join(&name), "before\n").unwrap();
         git(&["add", "."]);
         git(&["commit", "-qm", "base"]);
-        fs::write(root.join("한글\nname"), "x".repeat(PATCH_LIMIT + 100)).unwrap();
+        fs::write(root.join(&name), "x".repeat(PATCH_LIMIT + 100)).unwrap();
         let c = Backend::Git.changes(root, &Scope::Working, None).unwrap();
-        assert_eq!(c.files[0].path, "한글\nname");
+        assert_eq!(c.files[0].path, name);
         let p = Backend::Git.patch(root, &Scope::Working, None, None).unwrap();
         assert!(p.truncated);
         assert!(p.text.len() <= PATCH_LIMIT);
-        fs::write(root.join("한글\nname"), vec![0xff; 900_000]).unwrap();
+        fs::write(root.join(&name), vec![0xff; 900_000]).unwrap();
         let p = Backend::Git.patch(root, &Scope::Working, None, None).unwrap();
         assert!(p.truncated);
         assert!(p.text.len() <= PATCH_LIMIT);
@@ -1271,8 +1283,9 @@ mod tests {
         fs::write(root.join("leftover/x.log"), "ignored\n").unwrap();
         fs::create_dir_all(root.join("fresh/inner")).unwrap();
         fs::write(root.join("fresh/inner/f"), "f\n").unwrap();
-        fs::create_dir_all(root.join("-x\ny")).unwrap();
-        fs::write(root.join("-x\ny/f"), "f\n").unwrap();
+        let odd = hostile("-x\ny");
+        fs::create_dir_all(root.join(&odd)).unwrap();
+        fs::write(root.join(&odd).join("f"), "f\n").unwrap();
         fs::create_dir(root.join("to")).unwrap();
         git(&["mv", "move/a", "to/a"]);
         // A link where a directory stood is read as no directory, never followed out of the checkout.
@@ -1293,7 +1306,7 @@ mod tests {
         assert_eq!(got["leftover"], "M", "ignored leftovers keep the directory on disk");
         assert_eq!(got["fresh"], "A");
         assert_eq!(got["fresh/inner"], "A");
-        assert_eq!(got["-x\ny"], "A");
+        assert_eq!(got[odd.as_str()], "A");
         assert_eq!(got["to"], "A");
         assert!(!got.contains_key("move"));
         #[cfg(unix)]
@@ -1365,14 +1378,15 @@ mod tests {
         fs::create_dir(&main).unwrap();
         let git = |root: &Path, args: &[&str]| run_git(root, None, args);
         git(&main, &["init", "-q"]);
-        fs::write(main.join("-old\nname"), body("a")).unwrap();
+        let old = hostile("-old\nname");
+        fs::write(main.join(&old), body("a")).unwrap();
         fs::write(main.join("other"), "other\n").unwrap();
         git(&main, &["add", "."]);
         git(&main, &["commit", "-qm", "base"]);
         git(&main, &["branch", "milestone/m1"]);
         git(&main, &["worktree", "add", "-qb", "feature", side.to_str().unwrap(), "milestone/m1"]);
         // One commit renames, the next edits three lines under the new name.
-        git(&side, &["mv", "--", "-old\nname", "new"]);
+        git(&side, &["mv", "--", &old, "new"]);
         git(&side, &["commit", "-qm", "rename"]);
         let renamed = head(&side, None).unwrap();
         fs::write(side.join("new"), body("a").replacen("a line 3", "b line 3", 1).replacen("a line 9", "b 9", 1))
@@ -1380,7 +1394,7 @@ mod tests {
         fs::write(side.join("other"), "changed\n").unwrap();
         git(&side, &["commit", "-qam", "edit"]);
         let edited = head(&side, None).unwrap();
-        let names = vec!["new".to_owned(), "-old\nname".to_owned()];
+        let names = vec!["new".to_owned(), old];
         let scopes = [
             Scope::Commits(vec![renamed.clone(), edited.clone()]),
             Scope::Branch,

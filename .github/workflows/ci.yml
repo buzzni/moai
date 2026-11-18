@@ -474,7 +474,7 @@ jobs:
           cargo clippy --target aarch64-pc-windows-msvc --all-targets --workspace --locked -- -D warnings
 
       - name: test 를 돌린다
-        run: cargo test --workspace --locked
+        run: cargo test --workspace --locked --no-fail-fast
 
       # **PE 버전 정보가 들었는가**(moai-uwzg.kpx, 리뷰 moai-uwzg.i4r 6번). 위 스텝이 통합 시험을 위해
       # `target/debug/moai.exe` 를 이미 지었다 — `build.rs` 가 리소스를 안 넣게 된 PR 을 태그까지 끌고 가지

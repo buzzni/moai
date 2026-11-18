@@ -3222,6 +3222,10 @@ mod tests {
         Config::parse("prefix = \"argos\"\n").unwrap()
     }
 
+    /// The rows the link `lnk` takes above `src` at the root of [`files_app`]: one where a test can make a link, none
+    /// on Windows, where making one takes a privilege the runner may lack.
+    const LINK_ROWS: usize = if cfg!(unix) { 1 } else { 0 };
+
     /// A checkout with `.git`, a hidden file, a nested source tree, an ignored build directory and a link — and the
     /// explorer standing in it.
     fn files_app(name: &str) -> (Scratch, App) {
@@ -3314,7 +3318,7 @@ mod tests {
         a.hit("SPC g f");
         settle(&mut a);
         // A link to a directory inside sorts with the directories (`files::list`'s order).
-        assert_eq!(names(&a), ["lnk", "src", "target", ".env", "README.md"]);
+        assert_eq!(names(&a), ["lnk", "src", "target", ".env", "README.md"][1 - LINK_ROWS..]);
         assert_eq!((window(&a).focus, window(&a).cursor), (Side::Tree, 0));
         a.hit("j l");
         a.hit("Esc");
@@ -3407,7 +3411,7 @@ mod tests {
         a.hit("l");
         settle(&mut a);
         let opened = names(&a);
-        assert_eq!(opened[1..5], ["src (open)", "src/tui", "src/main.rs", "target"]);
+        assert_eq!(opened[LINK_ROWS..LINK_ROWS + 4], ["src (open)", "src/tui", "src/main.rs", "target"]);
         a.hit("l");
         settle(&mut a);
         assert_eq!(names(&a), opened, "l on an open directory did something");
@@ -3415,19 +3419,19 @@ mod tests {
         a.hit("h");
         assert_eq!(window(&a).current_path(), Some("src"), "h on a file did not go to the parent row");
         a.hit("h");
-        assert_eq!(names(&a)[1], "src", "h on an open directory did not fold it");
+        assert_eq!(names(&a)[LINK_ROWS], "src", "h on an open directory did not fold it");
         a.hit("Tab");
         settle(&mut a);
         assert_eq!(
-            names(&a)[1..5],
+            names(&a)[LINK_ROWS..LINK_ROWS + 4],
             ["src (open)", "src/tui (open)", "src/tui/files.rs", "src/main.rs"],
             "Tab did not spread"
         );
         a.hit("Tab");
-        assert_eq!(names(&a)[1], "src", "Tab on an open directory did not fold it");
+        assert_eq!(names(&a)[LINK_ROWS], "src", "Tab on an open directory did not fold it");
         a.hit("l");
         settle(&mut a);
-        assert_eq!(names(&a)[2], "src/tui", "Tab left a folded branch open below");
+        assert_eq!(names(&a)[LINK_ROWS + 1], "src/tui", "Tab left a folded branch open below");
         // A file and `..` take no `l`, `Tab`; `Enter` on a file goes to the right pane.
         on(&mut a, "README.md");
         let before = names(&a);
@@ -3539,7 +3543,7 @@ mod tests {
         let began = Instant::now();
         a.hit("l");
         a.follow_files();
-        assert_eq!(names(&a)[1..3], ["src (open)", "<reading src>"]);
+        assert_eq!(names(&a)[LINK_ROWS..LINK_ROWS + 2], ["src (open)", "<reading src>"]);
         a.hit("j j");
         a.follow_files();
         assert!(began.elapsed() < Duration::from_millis(500), "a key waited on the read: {:?}", began.elapsed());
@@ -3579,7 +3583,7 @@ mod tests {
         a.hit("l h");
         std::thread::sleep(Duration::from_millis(300));
         settle(&mut a);
-        assert_eq!(names(&a)[1], "src", "the late answer opened a folded directory");
+        assert_eq!(names(&a)[LINK_ROWS], "src", "the late answer opened a folded directory");
     }
 
     /// **A dead reader raises its panic on the loop**, as the reread thread's does.
