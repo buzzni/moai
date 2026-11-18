@@ -21,6 +21,7 @@
 //!   대상으로 한 `info`·`diff`, 모든 `log`)은 따로 [`SERVER_TIMEOUT`] 안에 끝나야 한다 — 사람이 정한
 //!   "svn 읽기에만 30초" 다. 로컬 작업 사본만 읽는 부름은 git 과 같이 부르는 쪽 시한만 따른다
 
+pub(crate) mod cache;
 pub(crate) mod xml;
 
 use std::ffi::OsString;
@@ -61,13 +62,12 @@ pub(crate) enum Arg<'a> {
     Path(&'a str),
     /// 저장소 URL. 리비전을 주면 `<URL>@<rev>`, 안 주면 빈 peg(`<URL>@`) 로 싼다 — URL 에 든 `@` 를
     /// svn 이 peg 로 읽지 않게.
-    #[allow(dead_code)] // moai-0d0s.4o8 (commits) and moai-0d0s.x27 (branch·whole) use this.
     Url(&'a str, Option<u64>),
     /// `--old=<URL>@<rev>` — URL 대 작업 사본 diff 의 옛 쪽.
-    #[allow(dead_code)] // moai-0d0s.4o8 (commits) and moai-0d0s.x27 (branch·whole) use this.
+    #[allow(dead_code)] // moai-0d0s.x27 (branch·whole) uses this.
     Old(&'a str, u64),
     /// `--new=<뿌리 밑 경로>` — URL 대 작업 사본 diff 의 새 쪽.
-    #[allow(dead_code)] // moai-0d0s.4o8 (commits) and moai-0d0s.x27 (branch·whole) use this.
+    #[allow(dead_code)] // moai-0d0s.x27 (branch·whole) uses this.
     New(&'a str),
     /// 작업 사본 `diff` 의 대상 경로 — `./<경로>`, **끝에 `@` 를 안 붙인다**(moai-0d0s.s6g 실측, svn 1.14.3).
     /// 작업 사본 대상의 `svn diff` 는 peg 를 안 읽는다: `./a@b` 는 그대로 `a@b` 고, `./m.txt@` 는 `@` 까지 이름으로
@@ -220,6 +220,9 @@ pub(crate) enum Error {
     Offline(Option<String>),
     /// 그 밖의 실패 — svn 의 stderr 를 싣는다. 낡은 작업 사본의 "upgrade 하라" 도 여기다.
     Failed(String),
+    /// id → 리비전 표([`cache`])를 아직 다 못 채웠다 — 시한이 먼저 다 됐다(moai-0d0s.4o8). 채운 조각은 캐시에
+    /// 남아 다음 부름이 이어 채운다. 덜 찬 표로는 답하지 않는다. 기계의 말은 `timeout` 이다.
+    Filling,
 }
 
 /// 서버(저장소)에 못 닿았다는 svn 오류 코드. `E170013` 은 `file://` 의 없는 저장소에도 서고(실측),
@@ -246,6 +249,7 @@ impl Error {
             Error::Timeout => "timeout",
             Error::Offline(_) => "offline",
             Error::Failed(_) => "failed",
+            Error::Filling => "timeout",
         }
     }
 
@@ -256,6 +260,7 @@ impl Error {
             Error::Timeout => String::new(),
             Error::Offline(why) => why.clone().unwrap_or_default(),
             Error::Failed(why) => why.clone(),
+            Error::Filling => "the revision table is still being filled".into(),
         }
     }
 
@@ -345,6 +350,105 @@ fn info_of(text: &str) -> Option<Info> {
         uuid: field(repo, "uuid")?,
         revision: entry.attr("revision")?.trim().parse().ok()?,
     })
+}
+
+/// A chunk of `log --xml` is cut here and asked again at half the range (moai-0d0s.4o8).
+const LOG_LIMIT: usize = 32 * 1024 * 1024;
+
+/// `(revision, message)` of each `<logentry>` — a revision the reader may not see has no `<msg>` and reads as empty.
+fn log_entries(text: &str) -> Vec<(u64, String)> {
+    let doc = xml::parse(text);
+    let Some(log) = doc.child("log") else { return Vec::new() };
+    log.children("logentry")
+        .filter_map(|e| {
+            let rev = e.attr("revision")?.trim().parse().ok()?;
+            Some((rev, e.child("msg").map(xml::Element::text).unwrap_or_default()))
+        })
+        .collect()
+}
+
+/// The commits whose subject or `Refs:`·`Closes:`·`Fixes:` lines name `id`, newest first — what
+/// [`crate::git::commits_within`] gives for Git, with `r<number>` in place of a hash (moai-0d0s.4o8).
+///
+/// The answer comes from the id → revision table ([`cache`]): read from the person's cache directory, brought up to
+/// HEAD from the repository root's log at most once a minute. The working copy is read for its repository root and
+/// UUID only; nothing in it or in `.moai` is written. `budget` bounds the whole read; without one the read stops at
+/// [`SERVER_TIMEOUT`] all told (the person's "30 seconds for `moai diff`, keeping what was filled"), and every server
+/// call keeps its own [`SERVER_TIMEOUT`] too. A table never completed answers nothing — the read is
+/// [`Error::Filling`] or the reason it stopped — and a table completed before answers when the server cannot.
+#[allow(dead_code)] // moai-0d0s.qg0 wires this into `changes::offers`.
+pub(crate) fn commits_within(
+    root: &Path,
+    id: &str,
+    budget: Option<Duration>,
+) -> Result<Vec<crate::git::Commit>, Error> {
+    let text = crate::model::now();
+    let now = match crate::model::parse_rfc3339(&text) {
+        Some(_) => text,
+        None => crate::model::format_rfc3339(
+            std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH).map_or(0, |d| d.as_secs() as i64),
+        ),
+    };
+    let table = table_within(root, budget, cache::dir().as_deref(), &now, cache::CHUNK, SERVER_TIMEOUT)?;
+    Ok(table.commits(id))
+}
+
+/// [`commits_within`]'s table, with its cache directory, clock, chunk size and server time given.
+fn table_within(
+    root: &Path,
+    budget: Option<Duration>,
+    dir: Option<&Path>,
+    now: &str,
+    chunk: u64,
+    server: Duration,
+) -> Result<cache::Table, Error> {
+    let end = std::time::Instant::now() + budget.unwrap_or(server);
+    if budget == Some(Duration::ZERO) {
+        return Err(Error::Timeout);
+    }
+    let left = || end.saturating_duration_since(std::time::Instant::now());
+    // With the caller's budget, a call past it is `timeout` and one past its server time `offline`. Without one, the
+    // read's cap is each call's server time, so a stop is `offline` and [`cache::settle`] tells the cap apart.
+    let call = |sub: Sub, args: &[Arg], limit: usize| match budget {
+        Some(_) => bounded(command(root, sub, args), reaches_server(sub, args), limit, Some(left()), server),
+        None => bounded(command(root, sub, args), reaches_server(sub, args), limit, None, server.min(left())),
+    };
+    let here = info(root, "", budget.map(|_| left()))?;
+    let path = dir.and_then(|d| cache::path_in(d, &here.uuid));
+    let mut table = path.as_deref().map_or_else(|| cache::Table::new(&here.uuid), |p| cache::read(p, &here.uuid));
+    let seconds = crate::model::parse_rfc3339(now).unwrap_or(0);
+    if table.fresh(seconds) {
+        return Ok(table);
+    }
+    let save = |t: &cache::Table| {
+        if let Some(p) = &path {
+            // A table that cannot be kept is still the answer; the next read asks the server again.
+            let _ = cache::write(p, t);
+        }
+    };
+    let root_url = here.repos_root.as_str();
+    let filled = (|| {
+        let (out, cut) = call(Sub::Info, &[Arg::Flag("--xml"), Arg::Url(root_url, None)], 1024 * 1024)?;
+        let head = (!cut)
+            .then(|| info_of(&String::from_utf8_lossy(&out)))
+            .flatten()
+            .ok_or_else(|| Error::Failed("svn info gave no repository head".into()))?
+            .revision;
+        let fetch = |from: u64, to: u64| {
+            let range = Arg::Value("-r", format!("{from}:{to}"));
+            let (out, cut) = call(Sub::Log, &[Arg::Flag("--xml"), range, Arg::Url(root_url, None)], LOG_LIMIT)?;
+            if cut {
+                return Ok(cache::Fetched::Cut);
+            }
+            let entries = log_entries(&String::from_utf8_lossy(&out));
+            Ok(cache::Fetched::Revs(entries.into_iter().filter_map(|(rev, msg)| cache::rev_of(rev, &msg)).collect()))
+        };
+        cache::fill(&mut table, head, chunk, now, fetch, save)
+    })();
+    match filled {
+        Ok(()) => Ok(table),
+        Err(stop) => cache::settle(&table, stop, left().is_zero()).map(|()| table),
+    }
 }
 
 #[cfg(test)]
@@ -834,5 +938,128 @@ pub(crate) mod tests {
             i += 1;
         }
         String::from_utf8_lossy(&out).into_owned()
+    }
+
+    const T0: &str = "2026-11-18T00:00:00Z";
+    fn at(secs: i64) -> String {
+        crate::model::format_rfc3339(crate::model::parse_rfc3339(T0).expect("T0") + secs)
+    }
+    fn hashes(table: &cache::Table, id: &str) -> Vec<(String, bool)> {
+        table.commits(id).into_iter().map(|c| (c.hash, c.tracker)).collect()
+    }
+    /// Every name under the working copy but `.svn` — a read must add none.
+    fn tree(wc: &Path) -> Vec<String> {
+        fn walk(dir: &Path, base: &Path, out: &mut Vec<String>) {
+            for e in std::fs::read_dir(dir).expect("dir").flatten() {
+                let p = e.path();
+                if p.file_name().is_some_and(|n| n == ".svn") {
+                    continue;
+                }
+                out.push(p.strip_prefix(base).unwrap_or(&p).to_string_lossy().into_owned());
+                if p.is_dir() {
+                    walk(&p, base, out);
+                }
+            }
+        }
+        let mut out = Vec::new();
+        walk(wc, wc, &mut out);
+        out.sort();
+        out
+    }
+
+    /// trunk with the six ways a message can name `moai-ab12`, r2..r7.
+    fn named_repo(name: &str) -> (Repo, PathBuf) {
+        let repo = Repo::new(name);
+        let wc = repo.checkout("trunk", "wc");
+        let messages = [
+            "feat: one (moai-ab12)",
+            "fix: two\n\nRefs: moai-ab12",
+            "docs: prose\n\nthis sentence mentions moai-ab12 in passing",
+            "child moai-ab12.xyz",
+            "branch worktree-moai-ab12",
+            "chore(tracker): moai-ab12 를 집는다",
+        ];
+        for (n, msg) in messages.iter().enumerate() {
+            commit_files(&wc, &[("a.txt", &format!("{n}\n"))], msg);
+        }
+        (repo, wc)
+    }
+
+    #[test]
+    fn the_revision_table_reads_subjects_and_trailers_newest_first_and_writes_only_the_cache() {
+        if !svn_ready() {
+            return;
+        }
+        let (_repo, wc) = named_repo("svn-table");
+        let cache_dir = Scratch::new("svn-table-cache");
+        let before = (admin_snapshot(&wc), tree(&wc));
+        let table = table_within(&wc, None, Some(&cache_dir), T0, 2, SERVER_TIMEOUT).expect("table");
+        assert_eq!(
+            hashes(&table, "moai-ab12"),
+            [("r7".to_owned(), true), ("r3".to_owned(), false), ("r2".to_owned(), false)],
+            "the subject, the Refs line and the tracker commit (marked); never prose, a child or a branch name"
+        );
+        assert_eq!(table.commits("moai-ab12")[2].subject, "feat: one (moai-ab12)");
+        assert_eq!(hashes(&table, "moai-ab12.xyz"), [("r5".to_owned(), false)]);
+        assert_eq!((table.through, table.complete()), (7, true));
+        assert_eq!((admin_snapshot(&wc), tree(&wc)), before, "the working copy is only read");
+        let here = info(&wc, "", None).expect("info");
+        let file = cache_dir.join(format!("{}.json", here.uuid));
+        assert_eq!(crate::scratch::names(&cache_dir), [format!("{}.json", here.uuid)]);
+        assert_eq!(cache::read(&file, &here.uuid), table);
+        // No cache directory known: the same answer, nothing written anywhere.
+        let none = table_within(&wc, None, None, T0, 2, SERVER_TIMEOUT).expect("table");
+        assert_eq!(none.commits("moai-ab12"), table.commits("moai-ab12"));
+        assert_eq!(tree(&wc), before.1);
+        // The crate's entry point reads the same, through the cache directory this thread is given.
+        let other = Scratch::new("svn-table-entry");
+        let got = cache::tests::with_dir(Some(&other), || commits_within(&wc, "moai-ab12", None)).expect("commits");
+        assert_eq!(got, table.commits("moai-ab12"));
+        assert!(other.join(format!("{}.json", here.uuid)).is_file());
+        // A budget of nothing is a timeout, not a guess.
+        assert!(matches!(table_within(&wc, Some(Duration::ZERO), None, T0, 2, SERVER_TIMEOUT), Err(Error::Timeout)));
+    }
+
+    #[test]
+    fn the_table_asks_the_server_once_a_minute_and_reads_only_what_is_new() {
+        if !svn_ready() {
+            return;
+        }
+        let (_repo, wc) = named_repo("svn-poll");
+        let cache_dir = Scratch::new("svn-poll-cache");
+        let read = |now: &str| table_within(&wc, None, Some(&cache_dir), now, 2, SERVER_TIMEOUT).expect("table");
+        assert_eq!(read(T0).through, 7);
+        commit_files(&wc, &[("b.txt", "b\n")], "late (moai-ab12)");
+        let cached = read(&at(30));
+        assert_eq!((cached.through, cached.checked_at.as_deref()), (7, Some(T0)), "inside the minute: the file alone");
+        let later = read(&at(61));
+        assert_eq!(later.through, 8);
+        assert_eq!(hashes(&later, "moai-ab12")[0], ("r8".to_owned(), false));
+        assert_eq!(later.checked_at.as_deref(), Some(at(61).as_str()));
+        // A check time ahead of the clock asks at once.
+        commit_files(&wc, &[("c.txt", "c\n")], "later still (moai-ab12)");
+        assert_eq!(read(&at(-3600)).through, 9);
+    }
+
+    #[test]
+    fn a_server_out_of_reach_answers_from_a_complete_table_or_says_offline() {
+        if !svn_ready() {
+            return;
+        }
+        let (repo, wc) = named_repo("svn-offline");
+        let cache_dir = Scratch::new("svn-offline-cache");
+        let full = table_within(&wc, None, Some(&cache_dir), T0, 2, SERVER_TIMEOUT).expect("table");
+        std::fs::remove_dir_all(repo.scratch.join("repo")).expect("drop the repository");
+        let before = admin_snapshot(&wc);
+        // Long past the minute, the server is asked and is gone: the complete table answers.
+        let stale = table_within(&wc, None, Some(&cache_dir), &at(3600), 2, SERVER_TIMEOUT).expect("served");
+        assert_eq!(stale.commits("moai-ab12"), full.commits("moai-ab12"));
+        // No table to fall back on: offline, and no panic, no hang.
+        let empty = Scratch::new("svn-offline-empty");
+        let got = table_within(&wc, None, Some(&empty), T0, 2, SERVER_TIMEOUT);
+        assert!(matches!(got, Err(Error::Offline(Some(_)))), "{got:?}");
+        let got = table_within(&wc, None, None, T0, 2, SERVER_TIMEOUT);
+        assert_eq!(got.map(|_| ()).map_err(|e| e.kind()), Err("offline"));
+        assert_eq!(admin_snapshot(&wc), before);
     }
 }

@@ -738,6 +738,9 @@ fn isolated(program: impl AsRef<std::ffi::OsStr>) -> Command {
         .env("MOAI_CTL_DIR", ctl_dir)
         .env_remove("XDG_RUNTIME_DIR")
         .env_remove("XDG_CONFIG_HOME")
+        // svn 의 id → 리비전 표(moai-0d0s.4o8)는 `XDG_CACHE_HOME` 이 있으면 그 밑에 쓴다 — 걷으면 위의 시험 집
+        // (`<HOME>/.cache`)에 선다.
+        .env_remove("XDG_CACHE_HOME")
         // 키 파일(moai-aqmg)도 사람의 것이 새면 안 된다 — `--help` 가 그 키로 그려져 도움말을 재는 시험이 돌리는
         // 사람마다 달라진다. 걷으면 위의 없는 설정 곁(`keys.toml`)을 보니 기본 키다.
         .env_remove("MOAI_KEYS")
