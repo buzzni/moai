@@ -678,17 +678,28 @@ mod tests {
         assert_ne!(before, stamp(&j, ".env").unwrap());
         assert!(stamp(&j, "missing").is_none());
     }
+    /// A name that is not UTF-8 is listed but not opened; a backslash is a plain letter on Unix. APFS refuses a name
+    /// that is not UTF-8 (`EILSEQ`), so on macOS only the backslash half can be built.
     #[cfg(unix)]
     #[test]
     fn non_utf8_names_are_visible_but_not_openable() {
-        use std::os::unix::ffi::OsStringExt;
         let dir = crate::scratch::Scratch::new("files-names");
         let root: &Path = &dir;
-        fs::write(root.join(std::ffi::OsString::from_vec(vec![0xff])), "hidden bytes").unwrap();
+        #[cfg(not(target_os = "macos"))]
+        {
+            use std::os::unix::ffi::OsStringExt;
+            fs::write(root.join(std::ffi::OsString::from_vec(vec![0xff])), "hidden bytes").unwrap();
+        }
         fs::write(root.join("a\\b"), "backslash").unwrap();
         let j = jail(root);
         let entries = list(&j, ".").unwrap().entries;
+        #[cfg(not(target_os = "macos"))]
         assert!(entries.iter().any(|e| !e.openable));
+        assert!(
+            entries.iter().any(|e| e.name == "a\\b" && e.openable),
+            "{:?}",
+            entries.iter().map(|e| &e.name).collect::<Vec<_>>()
+        );
         assert_eq!(read(&j, "a\\b").unwrap().text, "backslash");
     }
     #[test]
