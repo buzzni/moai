@@ -13599,3 +13599,7 @@
 {"ts":"2026-11-18T03:42:04Z","id":"moai-bsu2.5g1","kind":"status","by":"레이븐","by_email":"raven@buzzni.com","from":"in_progress","to":"done","note":"Reviewer found no correctness bugs; two minor test-code nits (vcs.rs:1300 lnk cfg gate, boot.rs:227 words() rebuilt) not taken — unverifiable on Windows / negligible churn."}
 {"ts":"2026-11-18T03:42:05Z","id":"moai-bsu2.5g1","kind":"note","by":"레이븐","by_email":"raven@buzzni.com","text":"model: anthropic/opus-5.5 (xhigh — epic-end review)"}
 {"ts":"2026-11-18T03:42:05Z","id":"moai-bsu2","kind":"note","by":"레이븐","by_email":"raven@buzzni.com","text":"Next: push develop, watch PR #89 CI (Windows/macOS cargo test have never run on it)."}
+{"ts":"2026-11-18T03:42:05Z","id":"moai-bsu2","kind":"note","by":"레이븐","by_email":"raven@buzzni.com","text":"report: moai-bsu2\nMerged into develop (no-ff). clippy manual_contains + windows unused var fixed; Gantt test rows made relative to today. fmt, clippy --all-targets, cargo test, web typecheck/test (710), build all green; src/web/dist unchanged."}
+{"ts":"2026-11-18T03:42:21Z","id":"moai-bsu2.255","kind":"note","by":"레이븐","by_email":"raven@buzzni.com","text":"model: anthropic/sonnet-5.5 (medium — clippy 두 줄)"}
+{"ts":"2026-11-18T03:42:21Z","id":"moai-bsu2.78p","kind":"note","by":"레이븐","by_email":"raven@buzzni.com","text":"model: anthropic/sonnet-5.5 (medium — 간트 시험 날짜를 시계에 맞춤)"}
+{"ts":"2026-11-18T03:42:21Z","id":"moai-bsu2","kind":"note","by":"레이븐","by_email":"raven@buzzni.com","text":"Report-checked: 49499850 merge into develop"}
