@@ -12,6 +12,8 @@ does not commit and it does not tag — see `CONTRIBUTING.md`.
 
 ## [Unreleased]
 
+## [1.4.0] - 2026-11-18
+
 ### Added
 
 - The web interface can browse checkout files in a tree with the explorer's branch lines, change marks, and file colours, search file names, inspect changes, and display issue or file diffs in unified or side-by-side layouts; a large diff shows every file's head at once and reads each opened file on its own, with a spinner while reading and a retry when a read fails. (moai-qm5t, moai-dy7a)
