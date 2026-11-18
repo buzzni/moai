@@ -13623,3 +13623,16 @@
 {"ts":"2026-11-18T05:08:08Z","id":"moai-w792","kind":"note","by":"레이븐","by_email":"raven@buzzni.com","text":"Report-checked: 5ed095cd merge into develop"}
 {"ts":"2026-11-18T05:51:09Z","id":"moai-kr2l","kind":"note","by":"레이븐","by_email":"raven@buzzni.com","text":"v1.4.0 released 2026-11-18T05:29:39Z (7 assets); PR #89 merged after two CI fix epics moai-bsu2, moai-w792"}
 {"ts":"2026-11-18T05:51:09Z","id":"moai-kr2l","kind":"status","by":"레이븐","by_email":"raven@buzzni.com","from":"in_progress","to":"done"}
+{"ts":"2026-11-18T07:16:39Z","id":"moai-t7db","kind":"create","by":"레이븐","by_email":"raven@buzzni.com","title":"v1.5.0"}
+{"ts":"2026-11-18T07:16:39Z","id":"moai-0d0s","kind":"create","by":"레이븐","by_email":"raven@buzzni.com","title":"svn 작업 사본의 변경·diff — vcs 의 둘째 백엔드"}
+{"ts":"2026-11-18T07:16:39Z","id":"moai-0d0s.gst","kind":"create","by":"레이븐","by_email":"raven@buzzni.com","title":"svn 을 부르는 층과 시험 발판 — 설치·CI·임시 저장소"}
+{"ts":"2026-11-18T07:16:39Z","id":"moai-0d0s.pz1","kind":"create","by":"레이븐","by_email":"raven@buzzni.com","title":"diff 파서가 svn 머리줄을 읽는다 — Index·속성·바이너리"}
+{"ts":"2026-11-18T07:16:39Z","id":"moai-0d0s.s6g","kind":"create","by":"레이븐","by_email":"raven@buzzni.com","title":"svn 백엔드: 작업 사본의 변경 목록·패치·무시된 디렉터리"}
+{"ts":"2026-11-18T07:16:39Z","id":"moai-0d0s.4o8","kind":"create","by":"레이븐","by_email":"raven@buzzni.com","title":"id → 리비전 표와 사용자 캐시 — commits 범위"}
+{"ts":"2026-11-18T07:16:39Z","id":"moai-0d0s.x27","kind":"create","by":"레이븐","by_email":"raven@buzzni.com","title":"trunk·branches 관례와 갈라진 자리 — branch·whole 범위"}
+{"ts":"2026-11-18T07:16:39Z","id":"moai-0d0s.qg0","kind":"create","by":"레이븐","by_email":"raven@buzzni.com","title":"moai diff·탐색기·웹이 svn 에서 답한다 — 말·git·svn 고르기·불변 확인"}
+{"ts":"2026-11-18T07:16:39Z","id":"moai-0d0s.zyb","kind":"create","by":"레이븐","by_email":"raven@buzzni.com","title":"위키와 CHANGELOG — svn 작업 사본 쓰는 법"}
+{"ts":"2026-11-18T07:16:39Z","id":"moai-0d0s","kind":"note","by":"레이븐","by_email":"raven@buzzni.com","text":"Unfolded from moai-73o3 — svn 저장소의 변경·diff 보기"}
+{"ts":"2026-11-18T07:16:39Z","id":"moai-73o3","kind":"status","by":"레이븐","by_email":"raven@buzzni.com","from":"todo","to":"done","note":"Unfolded into moai-0d0s, 7 issues"}
+{"ts":"2026-11-18T07:16:49Z","id":"moai-0d0s","kind":"note","by":"레이븐","by_email":"raven@buzzni.com","text":"model: anthropic/fable-5.2 (high — plan: interview and detailed plan)"}
+{"ts":"2026-11-18T07:20:03Z","id":"moai-0d0s","kind":"note","by":"레이븐","by_email":"raven@buzzni.com","text":"Sent: subagent a4ba12a07f337edea"}
