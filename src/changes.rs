@@ -44,9 +44,6 @@ pub struct Answer {
     /// by the surfaces' notices, never in `--json`: the schema keeps git's keys.
     #[serde(skip)]
     pub notice: Option<String>,
-    /// `[vcs] backend` holds a value nobody knows — the default answered. `moai diff` says it on stderr.
-    #[serde(skip)]
-    pub warning: Option<String>,
 }
 pub struct Prepared {
     id: String,
@@ -274,6 +271,12 @@ fn svn_offers(p: &mut Prepared, repo: &Repo, issues: &[model::Issue], budget: Op
     p.commits = commits;
 }
 impl Prepared {
+    /// `[vcs] backend` holds a value nobody knows — known before any read, so `moai diff` says it even when the read is
+    /// refused (리뷰 moai-0d0s.h81 의 13).
+    pub fn warning(&self) -> Option<&str> {
+        self.warning.as_deref()
+    }
+
     /// The backend this read goes with — `None` when neither git nor svn is found.
     pub fn backend(&self) -> Option<vcs::Backend> {
         self.backend
@@ -289,7 +292,6 @@ impl Prepared {
             vcs_error: None,
             patch: String::new(),
             notice: self.notice.clone(),
-            warning: self.warning.clone(),
         }
     }
     /// The backend that reads `root`: the chosen one when it is svn, else what the disk says as before svn — a Git

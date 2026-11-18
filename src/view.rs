@@ -4496,7 +4496,6 @@ mod tests {
             vcs_error: None,
             patch: patch.into(),
             notice: None,
-            warning: None,
         };
         let lines = |patch: &str| {
             diff_output(&answer(patch), false).join("\n").split('\n').map(str::to_owned).collect::<Vec<_>>()

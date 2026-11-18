@@ -16,6 +16,9 @@ pub fn run(ctx: &Ctx, args: DiffArgs) -> R<Vec<String>> {
         DiffVcs::Svn => crate::vcs::Backend::Svn,
     });
     let prepared = crate::changes::offers(&repo, &load.issues, &args.id, None, ctx.lang(), vcs);
+    if let Some(warning) = prepared.warning() {
+        super::tell(warning);
+    }
     let requested = args.scope.map(|s| match s {
         DiffScope::Commits => Scope::Commits,
         DiffScope::Branch => Scope::Branch,
@@ -37,9 +40,6 @@ pub fn run(ctx: &Ctx, args: DiffArgs) -> R<Vec<String>> {
         };
         Fail::coded(message, super::code::BAD_INPUT)
     })?;
-    if let Some(warning) = &answer.warning {
-        super::tell(warning);
-    }
     if ctx.json {
         return super::json_line(&answer);
     }

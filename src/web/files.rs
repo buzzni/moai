@@ -480,7 +480,6 @@ fn checkout_changes(
         vcs_error: None,
         patch: String::new(),
         notice: None,
-        warning: None,
     };
     let mut out = add_highlights(&answer, highlight_until(left));
     out["scope"] = json!("whole");
@@ -587,7 +586,6 @@ mod tests {
             vcs_error: None,
             patch: String::new(),
             notice: None,
-            warning: None,
         };
         let line = |v: &Value, f: usize| v["files"][f]["hunks"][0]["lines"][0].clone();
         let far = Instant::now() + Duration::from_secs(60);

@@ -36572,6 +36572,10 @@ fn git_and_svn_both_found_choose_by_flag_then_config_then_git() {
     let (stdout, stderr) = (String::from_utf8_lossy(&out.stdout), String::from_utf8_lossy(&out.stderr));
     assert!(out.status.success() && stderr.contains("\"hg\"") && !stdout.contains("hg"), "{stdout}\n{stderr}");
     assert_eq!(json_of(&stdout)["files"][0]["path"], "g.txt");
+    // A refused read still says it (review moai-0d0s.h81, 13): the warning is known before any read.
+    let out = moai(&wc, &["diff", &id, "--scope", "commits", "--path", "nowhere.txt"]);
+    let stderr = String::from_utf8_lossy(&out.stderr);
+    assert!(!out.status.success() && stderr.contains("\"hg\""), "{stderr}");
     std::fs::write(&config, &plain).unwrap();
     // The web: the one key, the pick of a found backend, the refusal of the rest.
     let web = serve(&wc);
