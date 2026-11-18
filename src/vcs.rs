@@ -907,11 +907,16 @@ mod tests {
     use super::*;
     use crate::git::tests::run_git;
     use std::fs;
-    /// A name git has to quote, spelled as the platform can make it. The newline is the hard case and Unix takes it;
-    /// Windows takes no control character in a name, so there a space stands in and the rest (Hangul, a leading `-`)
-    /// still has to come through git untouched.
+    /// A name with a control character, spelled as the platform can make it. The newline is the hard case — git quotes
+    /// it in a patch header even under `core.quotePath=false` — and Unix takes it; Windows takes no control character
+    /// in a name, so there a space stands in for each and the rest (Hangul, a leading `-`) still has to come through
+    /// git untouched.
     fn hostile(unix: &str) -> String {
-        if cfg!(windows) { unix.replace('\n', " ") } else { unix.to_owned() }
+        if cfg!(windows) {
+            unix.chars().map(|c| if c.is_control() { ' ' } else { c }).collect()
+        } else {
+            unix.to_owned()
+        }
     }
     #[test]
     fn working_changes_and_literal_paths() {
