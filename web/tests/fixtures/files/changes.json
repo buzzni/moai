@@ -1,0 +1,13 @@
+{
+  "exit": 0,
+  "out": {
+    "files": [],
+    "scope": "whole",
+    "total": 0,
+    "truncated": false,
+    "vcs_error": {
+      "kind": "unavailable",
+      "said": "version control unavailable"
+    }
+  }
+}

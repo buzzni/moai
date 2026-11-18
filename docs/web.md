@@ -46,7 +46,7 @@ registered itself. Only registered projects can be read this way.
 
 Each browser keeps at most three visible tabs on live event streams, and the server at most 32 across every browser. The page stores a random browser id in IndexedDB. A single transaction makes simultaneously opened tabs agree, including over plain HTTP; an existing local-storage id is kept on migration. If IndexedDB is unavailable or does not answer within five seconds, the page falls back to local storage, where simultaneous first tabs may obtain different ids; a page that did reach IndexedDB copies its id there, so later fallbacks in that browser keep it. Pages that cannot keep an id share a single fallback budget. Additional tabs continue updating by polling every two seconds and retry a live connection every 30 seconds. Only tabs with a live stream appear in `moai ctl ls` and receive new suggestions. Hiding or closing a streaming tab reserves its place for its 30-second reconnect grace; afterwards it frees a place; this limit keeps ordinary reads responsive when many tabs are open.
 
-The page has four tabs.
+The page has five tabs.
 
 A visible tab can receive `moai ctl propose` suggestions from another terminal.
 The nonmodal card at the lower right starts with `» Suggestion` (or `» 제안`),
@@ -61,6 +61,7 @@ window](ctl.md#suggest-something-to-the-person) for waits and follow-up actions.
 | **Board** | A kanban: one column per status, with backlog and deferred columns and one lane per [milestone](glossary.md#milestone). Closed milestone lanes start folded. Epics are not cards; their members stand in their own columns. Select a lane title to see its milestone detail; use its chevron to fold or open it. | `SPC g b` |
 | **List** | The tree of milestones, [epics](glossary.md#epic) and issues, which you step into and fold. Milestones with unfinished work start open one level; closed milestones start folded. Manual folds survive a reread. | `SPC g l` |
 | **Gantt** | The tree beside a date axis: when each row was planned and when it actually ran | `SPC g g` |
+| **Files** | Checkout files, their contents, changes and diffs | `SPC g f` |
 | **Wiki** | The pages of this wiki: the page list on one side, the page on the other | `SPC g w` |
 
 Click a tab, or use the keys. Switching tabs keeps the list's cursor, filter and
@@ -84,7 +85,27 @@ columns stay plain. The detail starts on the right;
 `SPC o d`, or the position button, moves it right → bottom → left → top. Below
 640px it stays below the list. `SPC v d` hides it, and `SPC v r` switches the body
 and history notes between rendered markdown and the raw text.
-`Enter` on an issue moves the focus to the detail, and `SPC w w` moves it back.
+`Enter` on an issue moves the focus to the detail, and `SPC x x` moves it back.
+
+## Files and diffs
+
+Open **Files** with `SPC g f`. Select the current or another checkout from the selector, expand directories, and choose a file to view. `/` searches file names within the active directory; directories reported as ignored by version control are skipped, even when searching from within one; the search reports when that information is unavailable. Search results expand ancestor directories while keeping sibling nodes visible. Binary files are flagged rather than rendered as text; text reads truncate at 1 MiB and explicitly indicate truncation.
+
+The toolbar provides the checkout selector, a file search box, and three icon toggles: **Changed files only**, the diff pane, and the linked issue's detail view. Each toggle indicates its name and current state in its tooltip, such as `Diff · on`. The tree represents depth using the same branch lines as the issue list. Its first column displays each row's change mark: `M` for modified, `A` for added or untracked, and `R` for renamed; a directory reflects the rollup mark of changes beneath it. Deleted files appear exclusively under **Changed files only**, rendered struck through and marked `D`; in this mode, each directory also displays the aggregated `+n −n` totals of the files below it. File names are colored by file kind — source, documents, data, scripts, and binaries — matching the classification groups used by the explorer. Enabling **Changed files only** automatically opens the diff pane if closed, and disabling it closes the pane again unless it was manually toggled in the interim.
+
+Use `SPC v D` to toggle the diff pane; the issue list, board, and Gantt views also offer this pane for the currently selected issue. Choose between commit, branch, or working scopes, and switch between unified and side-by-side displays using the two layout buttons in the pane header or via `SPC o s`. Narrow panes automatically fall back to unified display. The pane loads the list of changed files first, immediately rendering every file header — mark, path, and `+n −n` counts; individual file patches are retrieved only when a header is expanded, with at most two concurrent requests, and the first file starts expanded. If a read takes more than a moment, a spinner and the label *Reading…* appear in its place. A failed or timed-out read displays an error message alongside a **Retry** button, without affecting other files. Files with over 5,000 changed lines are not fetched until you click **Load anyway**; for issue diffs, the pane also supplies the `moai diff <id> --scope <scope> --path='<file>'` command for inspection in a terminal. When positioned on a directory row in Files, the pane presents the headers of all changed files beneath it. Use `Tab` and `Shift-Tab` to navigate between diff files, and `H` and `L` to scroll horizontally. Within Files, navigate with `j`/`k` or arrow keys, collapse or expand directories with `h`/`l`, enter a directory or open a file with `Enter`, and go back with `Backspace`.
+
+Use `SPC w` to choose a checkout, `SPC v c` to show only changed files, `/` to focus the search box, and `SPC o s` to switch the diff layout. Search matches can be traversed with `n` and `N`.
+
+Visible files and diffs refresh automatically when their stamps or underlying changes update; background tabs suspend file polling. If a refresh fails, the last valid diff is retained and retried. Direct file editing is not supported. File reads are strictly confined to the chosen checkout: `.git` directories and symlinks pointing outside the checkout boundary are rejected. Sensitive files such as `.env` are not hidden; any client able to access a non-loopback server can read them.
+
+## File HTTP reads
+
+The web client issues GET requests subject to existing project, Host, and Origin checks. `root` specifies a checkout key returned by `/api/checkouts`, rather than a filesystem path. `/api/files?dir=&limit=` lists directory contents (optional limit: 1–5000); `/api/file?path=` returns text and syntax spans or a binary flag; `/api/find?dir=&q=` returns up to 500 file-name matches alongside truncation flags; `/api/ignored` enumerates ignored directories; `/api/files-stamp` accepts up to 64 `dir` parameters and one `path` parameter for change stamps. All paths are relative to the checkout. Directory traversals abort after 200,000 entries or when exceeding the request time budget, reporting an incomplete status.
+
+`/api/changes` and `/api/diff` accept either a checkout `root` or an issue `id`, using `scope=commits|branch|working` for issue queries. Issue queries may specify `worktree=1`; requested diff `path` entries must exist in the change list. Responses detail errors and truncation status, bound by a shared ten-second connection deadline across execution steps. Unrecognized and duplicate query parameters are rejected, except for repeated `dir` parameters on `/api/files-stamp`.
+
+Every file row in these responses carries a `mark` field with one of `M`, `A`, `D`, or `R`, folding Git's change kinds: untracked and copied files map to `A`, while type changes and conflicts map to `M`. A checkout's `/api/changes` endpoint additionally returns `dirs`, mapping each changed file's ancestor directory to its rollup mark: `A` when the directory is absent from the base tree, `D` when present in the base tree but deleted from disk, and `M` otherwise. A directory whose state cannot be determined (the request budget runs out, the disk will not open it, or its name is not UTF-8) stands `M`. When invoked without `scope`, an issue's `/api/changes` returns the files belonging to the scope that `/api/diff` would select alongside `offers`, enabling the web client to render all file headers before requesting individual patches. Syntax highlighting never blocks diff responses: as the budget deadline approaches, any remaining files retain their full text and hunks with `spans: null`, and the response indicates `highlight` as `full`, `partial`, or `none`. Only a stalled Git read results in a 504.
 
 ## Markdown
 
@@ -439,7 +460,7 @@ pressing its key. `?` shows the overlay of every key.
 | `Ctrl-f` `PageDown` / `Ctrl-b` `PageUp` | Page down / up |
 
 A browser keeps some `Ctrl` keys for itself, and `Ctrl-w` closes the tab, so the
-page binds no `Ctrl-w`: `SPC w` moves between panes. Where a browser takes
+page binds no `Ctrl-w`: `SPC x` moves between panes. Where a browser takes
 `Ctrl-f` or `Ctrl-b` first, `PageDown` and `PageUp` do the same. Click the page
 once and the keys reach it.
 
@@ -460,9 +481,10 @@ lanes.
 
 | Key | Does |
 |---|---|
-| `SPC w w` / `SPC w W` | Next / previous pane |
-| `SPC w h` `j` `k` `l` | Pane to the left / below / above / right |
-| `SPC g l` `b` `g` `w` | List / board / Gantt / wiki tab |
+| `SPC x x` / `SPC x X` | Next / previous pane |
+| `SPC x h` `j` `k` `l` | Pane to the left / below / above / right |
+| `SPC w` | Files tab: choose a checkout |
+| `SPC g l` `b` `g` `f` `w` | List / board / Gantt / files / wiki tab |
 | `SPC o d` | Detail position: right → bottom → left → top |
 | `SPC o t` | Pick the time zone dates are drawn in |
 
@@ -523,4 +545,4 @@ lanes.
 The page does not show the stats screen, and what it writes is a Gantt bar's days
 and your read marks.
 
-Decided in: moai-skjr, moai-e9hi, moai-8r2l, moai-0aa7, moai-jshy, moai-d86e.3ud, moai-ijjd, moai-lj8g, moai-ekg6 moai-mkzo moai-i07x moai-zgc1 moai-v5of moai-4v3h moai-7eeq moai-yigx moai-4xmq moai-okdc moai-z74b moai-1f3p
+Decided in: moai-skjr, moai-e9hi, moai-8r2l, moai-0aa7, moai-jshy, moai-d86e.3ud, moai-ijjd, moai-lj8g, moai-ekg6 moai-mkzo moai-i07x moai-zgc1 moai-v5of moai-4v3h moai-7eeq moai-yigx moai-4xmq moai-okdc moai-z74b moai-1f3p moai-qm5t

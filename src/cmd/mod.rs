@@ -10,6 +10,7 @@ pub mod config;
 pub mod ctl;
 pub mod daemon;
 pub mod defer;
+pub mod diff;
 pub mod due;
 pub mod edit;
 pub mod hook;
@@ -811,6 +812,7 @@ fn dispatch(ctx: &Ctx, cli: Cli) -> R<Vec<String>> {
         Cmd::Update(a) => update::run(ctx, a),
         Cmd::Add(a) => add::run(ctx, a, None),
         Cmd::Show(a) => show::run(ctx, a, None),
+        Cmd::Diff(a) => diff::run(ctx, a),
         Cmd::Stats(a) => stats::run(ctx, a),
         Cmd::Archive(a) => archive::run(ctx, a),
         Cmd::Mv(a) => mv::run(ctx, a),

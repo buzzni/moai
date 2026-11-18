@@ -1,0 +1,20 @@
+{
+  "exit": 0,
+  "out": {
+    "binary": false,
+    "path": "docs/example.txt",
+    "size": 8,
+    "spans": [
+      [
+        [
+          0,
+          7,
+          "other"
+        ]
+      ]
+    ],
+    "stamp": "STAMP",
+    "text": "example\n",
+    "truncated": false
+  }
+}

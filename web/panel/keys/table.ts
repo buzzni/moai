@@ -42,9 +42,9 @@ export type CellField = "id" | "priority" | "assignee" | "created" | "updated" |
 export interface KeyContext {
   mode: Mode
   /** Selected tab. */
-  tab?: "list" | "board" | "wiki" | "gantt"
+  tab?: "list" | "board" | "wiki" | "gantt" | "files"
   /** Focused pane. Browse: 'list' | 'detail'. Wiki: 'list' | 'page'. */
-  focus?: "list" | "detail" | "page"
+  focus?: "list" | "detail" | "diff" | "page"
   /** Detail pane shown (SPC v d). Default true. */
   detail?: boolean
   detailAt?: "right" | "top" | "left" | "bottom"
@@ -64,6 +64,8 @@ export interface KeyContext {
    * when it is given no read-mark writes, so the menu leaves the items out and the help dims them.
    */
   readable?: boolean
+  diff?: boolean
+  files?: { diff: boolean; detail: boolean; changed: boolean }
   proposals?: boolean
   /**
    * The numbered projects' names by digit (`1`-`9` and `SPC p 1`-`9`, data/projects.ts numberedNames); a digit past
@@ -75,7 +77,7 @@ export interface KeyContext {
 }
 
 export type StateId =
-  | "shown" | "hidden" | "asc" | "desc" | "right" | "top" | "left" | "bottom" | "raw" | "rendered" | "list" | "board" | "wiki" | "gantt"
+  | "shown" | "hidden" | "asc" | "desc" | "right" | "top" | "left" | "bottom" | "raw" | "rendered" | "list" | "board" | "wiki" | "gantt" | "files"
 
 /** The words when a caller passes none. */
 const DEFAULT_WORDS: KeyTableCopy = TABLE.ko
@@ -95,9 +97,9 @@ export type KeyLabel =
   | "wiki.halfDown" | "wiki.halfUp"
   | "focus.next" | "focus.prev" | "focus.left" | "focus.right" | "focus.up" | "focus.down"
   | "enter" | "leave" | "expand" | "collapse" | "expandAll" | "search" | "clear" | "read" | "help"
-  | "filter" | "tab.list" | "tab.board" | "tab.wiki" | "tab.gantt"
+  | "filter" | "tab.list" | "tab.board" | "tab.wiki" | "tab.gantt" | "tab.files"
   | "gantt.left" | "gantt.right" | "gantt.zoomIn" | "gantt.zoomOut" | "gantt.today" | "gantt.fit"
-  | "view.deferred" | "view.backlog" | "view.archived" | "view.worktree" | "view.all" | "view.allHelp" | "view.detail" | "view.raw" | "view.rawHelp"
+  | "view.diff" | "view.changed" | "view.checkout" | "option.side" | "view.deferred" | "view.backlog" | "view.archived" | "view.worktree" | "view.all" | "view.allHelp" | "view.detail" | "view.raw" | "view.rawHelp"
   | "sort.edit" | "read.all" | "read.group" | "read.groupHelp" | "proposal.accept" | "proposal.decline" | "proposal.list" | "option.detailAt" | "option.detailAtHelp"
   | "option.timezone" | "option.timezoneHelp" | "project.jumpHelp" | "menu.close" | "menu.up"
   | "prompt.apply" | "prompt.cancel" | "prompt.next" | "prompt.prev" | "prompt.up" | "prompt.down" | "prompt.clear" | "prompt.deleteWord"
@@ -109,7 +111,7 @@ export type KeyLabel =
 export type Label = KeyLabel | ((words: KeyTableCopy, ctx: KeyContext) => string)
 
 /** The SPC layers by their key after SPC. */
-export type LayerId = "a" | "g" | "p" | "v" | "s" | "c" | "m" | "o" | "w"
+export type LayerId = "a" | "g" | "p" | "v" | "s" | "c" | "m" | "o" | "x"
 
 export interface Binding {
   /** Action id the router dispatches (with `args`). The store performs it. */
@@ -166,8 +168,9 @@ const shown = (hidden: boolean | undefined): StateId => (hidden ? "hidden" : "sh
 /** Focus moves: the wiki always has list | page side by side; browse needs the detail and only moves along its axis. */
 function focusWhen(side: "next" | "prev" | "left" | "right" | "up" | "down"): (c: KeyContext) => boolean {
   return (c) => {
-    if (c.mode === "wiki") return side === "next" || side === "prev" || side === "left" || side === "right"
-    if (!detailShown(c)) return false
+    // The files tab, like the wiki, is always tree | content side by side, whatever the list's detail does.
+    if (c.mode === "wiki" || c.tab === "files") return side === "next" || side === "prev" || side === "left" || side === "right"
+    if (!detailShown(c) && !c.diff) return false
     if (side === "left" || side === "right") return detailAt(c) === "left" || detailAt(c) === "right"
     if (side === "up" || side === "down") return detailAt(c) === "bottom" || detailAt(c) === "top"
     return true
@@ -316,7 +319,7 @@ const cellBindings: Binding[] = CELLS.map(([key, field]): Binding => ({
 
 const focusMenu = (action: string, key: string, label: KeyLabel, side: Parameters<typeof focusWhen>[0]): Binding => ({
   action,
-  keys: [`SPC w ${key}`],
+  keys: [`SPC x ${key}`],
   label,
   group: "focus",
   // The wiki is list | page side by side: it has no up/down (its help must not list them either).
@@ -334,15 +337,20 @@ const MENU: ReadonlyArray<Binding> = [
   { action: "tab.list", keys: ["SPC g l"], label: "tab.list", group: "tab", modes: BOTH },
   { action: "tab.board", keys: ["SPC g b"], label: "tab.board", group: "tab", modes: BOTH },
   { action: "tab.gantt", keys: ["SPC g g"], label: "tab.gantt", group: "tab", modes: BOTH },
+  // The tab strip's order (view/tabs.ts TABS): the wiki is always last, so a new tab goes before it.
+  { action: "tab.files", keys: ["SPC g f"], label: "tab.files", group: "tab", modes: BOTH },
   { action: "tab.wiki", keys: ["SPC g w"], label: "tab.wiki", group: "tab", modes: BOTH },
   { action: "view.deferred", keys: ["SPC v l"], label: "view.deferred", group: "view", kind: "toggle", modes: BROWSE_ONLY, state: (c) => shown(c.hidden?.deferred) },
   { action: "view.backlog", keys: ["SPC v b"], label: "view.backlog", group: "view", kind: "toggle", modes: BROWSE_ONLY, state: (c) => shown(c.hidden?.backlog) },
   { action: "view.archived", keys: ["SPC v o"], label: "view.archived", group: "view", kind: "toggle", modes: BROWSE_ONLY, state: (c) => shown(c.hidden?.archived) },
   // The other worktrees' rows over the list, as the TUI's `SPC v w` (se-etwu); on when the page opens.
-  { action: "view.worktree", keys: ["SPC v w"], label: "view.worktree", group: "view", kind: "toggle", modes: BROWSE_ONLY, state: (c) => shown(c.hidden?.worktree) },
+  { action: "view.diff", keys: ["SPC v D"], label: "view.diff", group: "view", modes: BROWSE_ONLY, when: (c) => c.tab !== "wiki", kind: "toggle", state: (c) => shown(c.tab === "files" ? !c.files?.diff : !c.diff) },
+  { action: "view.changed", keys: ["SPC v c"], label: "view.changed", group: "view", modes: BROWSE_ONLY, when: (c) => c.tab === "files", kind: "toggle", state: (c) => shown(!c.files?.changed) },
+  // Not on the files tab: the checkout picker is `SPC w` there, and the list under that tab must not change quietly.
+  { action: "view.worktree", keys: ["SPC v w"], label: "view.worktree", group: "view", kind: "toggle", modes: BROWSE_ONLY, when: (c) => c.tab !== "files", state: (c) => shown(c.hidden?.worktree) },
   { action: "view.all", keys: ["SPC v a"], label: "view.all", helpLabel: "view.allHelp", group: "view", modes: BROWSE_ONLY },
   ...columnBindings,
-  { action: "view.detail", keys: ["SPC v d"], label: "view.detail", group: "view", kind: "toggle", modes: BROWSE_ONLY, state: (c) => shown(!detailShown(c)) },
+  { action: "view.detail", keys: ["SPC v d"], label: "view.detail", group: "view", kind: "toggle", modes: BROWSE_ONLY, state: (c) => shown(c.tab === "files" ? !c.files?.detail : !detailShown(c)) },
   {
     action: "view.raw",
     keys: ["SPC v r"],
@@ -371,10 +379,11 @@ const MENU: ReadonlyArray<Binding> = [
     group: "option",
     kind: "toggle",
     modes: BROWSE_ONLY,
-    when: (c) => detailShown(c) && !c.detailAtLocked,
+    when: (c) => (c.tab === "files" || c.diff === true || detailShown(c)) && !c.detailAtLocked,
     state: (c) => detailAt(c),
     verdict: "변경",
   },
+  { action: "option.side", keys: ["SPC o s"], label: "option.side", group: "option", modes: BROWSE_ONLY, when: (c) => c.tab === "files" || c.diff === true },
   // The TUI's `SPC o t` (keys.rs `Timezone`): opens the zone picker, it does not cycle. Dates on every tab follow it.
   {
     action: "option.timezone",
@@ -385,8 +394,12 @@ const MENU: ReadonlyArray<Binding> = [
     modes: BOTH,
     stateText: (c) => c.zone ?? null,
   },
-  focusMenu("focus.next", "w", "focus.next", "next"),
-  focusMenu("focus.prev", "W", "focus.prev", "prev"),
+  // The files tab's checkout picker, as the TUI's file window (`SPC w`). Only there: elsewhere it is hidden and quiet.
+  { action: "files.checkout", keys: ["SPC w"], label: "view.checkout", group: "view", modes: BROWSE_ONLY, when: (c) => c.tab === "files" },
+  // The pane moves: the TUI's Ctrl-w layer, moved under SPC because the browser closes its tab on Ctrl-w. `x` is a
+  // root letter neither surface uses; `x x` (next pane) is the hand the old `w w` was.
+  focusMenu("focus.next", "x", "focus.next", "next"),
+  focusMenu("focus.prev", "X", "focus.prev", "prev"),
   focusMenu("focus.left", "h", "focus.left", "left"),
   focusMenu("focus.down", "j", "focus.down", "down"),
   focusMenu("focus.up", "k", "focus.up", "up"),
@@ -403,7 +416,7 @@ export const LAYERS: ReadonlyArray<Layer> = [
   { prefix: "SPC c", id: "c" },
   { prefix: "SPC m", id: "m" },
   { prefix: "SPC o", id: "o" },
-  { prefix: "SPC w", id: "w" },
+  { prefix: "SPC x", id: "x" },
 ]
 
 /** Keys the router handles itself while the SPC menu is open (menu.rs MENU + the opening key). */
@@ -422,7 +435,7 @@ const PROMPT: ReadonlyArray<Binding> = [
   { action: "prompt.up", keys: ["Up"], label: "prompt.up", group: "prompt" },
   { action: "prompt.down", keys: ["Down"], label: "prompt.down", group: "prompt" },
   { action: "prompt.clear", keys: ["C-u"], label: "prompt.clear", group: "prompt", verdict: "확인" },
-  // Ctrl-w closes the browser tab, so neither the window moves nor the word delete take it: SPC w moves the focus.
+  // Ctrl-w closes the browser tab, so neither the window moves nor the word delete take it: SPC x moves the focus.
   { action: "prompt.deleteWord", keys: ["A-Backspace"], label: "prompt.deleteWord", group: "prompt", verdict: "대체" },
 ]
 
@@ -652,7 +665,7 @@ export function helpSections(
       if (binding.group !== group || binding.help === false) continue
       const keys = binding.helpKeys ? [...binding.helpKeys] : bindingKeys(binding, platform)
       if (keys.length === 0) continue
-      // One row per action: the SPC w and Ctrl-w forms of a focus move share a row.
+      // One row per action: two forms of one action (a key and its macOS-only one) share a row.
       const same = rows.find((r) => r.action === binding.action && JSON.stringify(r.args) === JSON.stringify(binding.args))
       const available = binding.group === "menu" || isAvailable(binding, { ...ctx, mode })
       if (same) {

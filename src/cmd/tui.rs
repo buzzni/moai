@@ -1277,12 +1277,27 @@ impl Answer {
 ///
 /// **편집기가 터미널을 쥔 동안에는 편집기가 끝날 때까지 기다린다**([`EDITING`]).
 fn modes_off_on_panic() {
-    let next = std::panic::take_hook();
-    std::panic::set_hook(Box::new(move |info| {
+    std::panic::set_hook(restoring(std::panic::take_hook(), modes_off));
+}
+
+type Hook = Box<dyn Fn(&std::panic::PanicHookInfo<'_>) + Sync + Send + 'static>;
+
+/// The hook [`modes_off_on_panic`] sets: `off`, then the hook it wraps (ratatui's restore, then the message).
+///
+/// **A panic the syntax highlighter catches passes through untouched** (review moai-vyu7.nsy 9). The file window
+/// highlights on its reader thread and `highlight` catches a parser panic there, keeping the line plain — but the
+/// hook runs before the catch, so without this the terminal left raw mode and the alternate screen while the explorer
+/// went on drawing, and the message landed on the screen. It skips only that thread's caught parse
+/// (`highlight::catching` is per thread): any other panic, on any thread, still puts the terminal back.
+fn restoring(next: Hook, off: impl Fn() + Sync + Send + 'static) -> Hook {
+    Box::new(move |info| {
+        if crate::highlight::catching() {
+            return;
+        }
         EDITING.wait();
-        modes_off();
+        off();
         next(info);
-    }));
+    })
 }
 
 /// 편집기에 터미널을 넘긴 동안 **다른 스레드의 패닉 훅을 세워 두는 문**(moai-46xe).
@@ -2026,6 +2041,58 @@ fn loop_until_quit(
 
 #[cfg(test)]
 mod tests {
+    /// **A parser panic the highlighter catches does not put the terminal back; any other panic does** (review
+    /// moai-vyu7.nsy 9). The hook is the real one ([`super::restoring`]) over counting stand-ins for the mode switch and
+    /// ratatui's restore. Hooks are process-wide and other tests swap them, so a round whose panic our hook never saw
+    /// is run again — counts are taken from this thread only.
+    #[test]
+    fn a_caught_highlight_panic_leaves_the_terminal_alone() {
+        use std::sync::Arc;
+        use std::sync::atomic::{AtomicUsize, Ordering::SeqCst};
+        let me = std::thread::current().id();
+        let mine = move || std::thread::current().id() == me;
+        let (seen, off, next) =
+            (Arc::new(AtomicUsize::new(0)), Arc::new(AtomicUsize::new(0)), Arc::new(AtomicUsize::new(0)));
+        let round = |f: &dyn Fn()| -> Option<(usize, usize)> {
+            for counter in [&seen, &off, &next] {
+                counter.store(0, SeqCst);
+            }
+            let (o, n, s) = (off.clone(), next.clone(), seen.clone());
+            let hook = super::restoring(
+                Box::new(move |_| {
+                    if mine() {
+                        n.fetch_add(1, SeqCst);
+                    }
+                }),
+                move || {
+                    if mine() {
+                        o.fetch_add(1, SeqCst);
+                    }
+                },
+            );
+            let prev = std::panic::take_hook();
+            std::panic::set_hook(Box::new(move |info| {
+                if mine() {
+                    s.fetch_add(1, SeqCst);
+                }
+                hook(info);
+            }));
+            f();
+            std::panic::set_hook(prev);
+            (seen.load(SeqCst) > 0).then(|| (off.load(SeqCst), next.load(SeqCst)))
+        };
+        let settle = |f: &dyn Fn()| (0..50).find_map(|_| round(f)).expect("our hook never saw the panic");
+        let caught = settle(&|| {
+            let rows = crate::highlight::tripping(|| crate::highlight::lines("a.rs", "let a = 1;\n"));
+            assert_eq!(rows, Some(vec![Vec::new()]), "the parser panic was not caught as plain text");
+        });
+        assert_eq!(caught, (0, 0), "a caught parser panic put the terminal back");
+        let other = settle(&|| {
+            let _ = std::panic::catch_unwind(|| panic!("something else fell over"));
+        });
+        assert_eq!(other, (1, 1), "another panic did not put the terminal back");
+    }
+
     #[test]
     fn slow_history_poll_backs_off_without_delaying_short_reads() {
         use std::time::Duration;

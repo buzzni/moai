@@ -42,6 +42,14 @@ export interface IconButtonProps {
   onClick?: (event: MouseEvent) => void
 }
 
+/** A toggle's tooltip and accessible name: `name · on|off`, so the state reads without the colour. */
+export const stateLabel = (name: string, on: boolean, words: { on: string; off: string }): string => `${name} · ${on ? words.on : words.off}`
+/** Repaint a toggle's state in place — pressed, name and tooltip — rather than rebuilding it, which would drop its focus. */
+export function paintState(button: HTMLElement, name: string, on: boolean, words: { on: string; off: string }): void {
+  const label = stateLabel(name, on, words)
+  button.setAttribute("aria-pressed", String(on)); button.setAttribute("aria-label", label); button.title = label
+}
+
 /** 28x28 icon button (look-and-feel 5.2). */
 export function iconButton(doc: Document, props: IconButtonProps): HTMLButtonElement {
   const button = el(doc, "button", {

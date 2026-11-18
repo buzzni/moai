@@ -8,17 +8,21 @@
 //! 않다는 것은 `CONTRIBUTING.md` 의 "The library" 에 있다.
 
 mod archive;
+mod changes;
 mod cli;
 mod cmd;
 pub mod config;
 mod ctl;
 mod daemon;
+mod diff;
 mod draft;
 pub mod fail;
+mod files;
 mod git;
 mod git_leaks;
 mod guide;
 pub mod held;
+mod highlight;
 mod hook;
 pub mod i18n;
 mod id;
@@ -49,6 +53,7 @@ mod tui;
 pub mod tz;
 mod update;
 pub mod user_config;
+mod vcs;
 mod view;
 mod web;
 mod wiki;

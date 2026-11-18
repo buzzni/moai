@@ -16,7 +16,9 @@ import { isUnread, readMarks } from './data/read.js'
 import { browserId as loadBrowserId } from './data/browser-id.js'
 import { openEvents, type Events } from './data/events.js'
 import { createCtl, type Reply as CtlReply } from './ctl.js'
-import { BACKOFF_MS, createRefresher, POLL_MS } from './data/refresh.js'
+import { BACKOFF_MS, createRefresher, documentVisibility, POLL_MS } from './data/refresh.js'
+import { createFilesRefresher } from './data/files-refresh.ts'
+import { changeFingerprint, changeSetOf, changesOf } from './data/files.ts'
 import { sortQuery, useVocabulary } from './data/query.js'
 import { orderExpression, useSortVocabulary } from './view/sort-adapter.js'
 import {
@@ -411,7 +413,12 @@ async function start(): Promise<void> {
   // `/api/stamp` moves when the tracker's files do: the rows are read only then, and not at all while the page is out
   // of sight (data/refresh.ts). A server that answers with a refusal still answers, so its stamp is a word that never
   // repeats and the read says why.
-  let refused = 0
+  let refused = 0, lastTrackerStamp: string | null = null
+  const observeTracker = (value: string) => {
+    if (document.visibilityState === 'hidden') return
+    if (lastTrackerStamp !== null && lastTrackerStamp !== value) shell.trackerChanged()
+    lastTrackerStamp = value
+  }
   const stamp = async (): Promise<string | null> => {
     // An answer that never comes is the server out of reach too: a stamp waited on for ever would stop the asking
     // for good, and a stopped process can leave its port taking connections that nobody answers.
@@ -422,14 +429,20 @@ async function start(): Promise<void> {
       // changes what the overlaid list says, so the page must look again within the poll. Off, it stays as it was.
       const answer = await fetcher(store.getState().view.worktree ? '/api/stamp?worktree=1' : '/api/stamp', { signal: abort.signal, headers: { Accept: 'application/json' } })
       const body = JSON.parse(await answer.text()) as { stamp?: unknown }
-      return answer.status === 200 && typeof body.stamp === 'string' ? body.stamp : `refused-${++refused}`
+      if (answer.status === 200 && typeof body.stamp === 'string') {
+        observeTracker(body.stamp)
+        return body.stamp
+      }
+      return `refused-${++refused}`
     } catch (error) {
       return error instanceof SyntaxError ? `unreadable-${++refused}` : null
     } finally {
       clearTimeout(limit)
     }
   }
-  const refresher = createRefresher({ load: ({ automatic, stamp: readAt, reuse }) => loadBoard(automatic, readAt, reuse), stamp, onReach: (reached) => shell.offline(!reached), onBackoff: (on) => shell.backoff(on) })
+  let trackerBackoff = false, filesBackoff = false
+  const showBackoff = () => shell.backoff(trackerBackoff || filesBackoff)
+  const refresher = createRefresher({ load: ({ automatic, stamp: readAt, reuse }) => loadBoard(automatic, readAt, reuse), stamp, onReach: (reached) => shell.offline(!reached), onBackoff: (on) => { trackerBackoff = on; showBackoff() } })
   let tab: { id: string; token: string } | null = null
   let browserId: string | null = null
   const eventUrl = (): string => {
@@ -532,7 +545,7 @@ async function start(): Promise<void> {
     // The clock's own list reads run quietly: a line every few seconds would cover the rows at the foot of the panes
     // for nothing (se-24ey.a80). A read the person asked for, or one that waits beside it (a detail, the wiki), still shows.
     const quiet = quietLoad !== 0 && quietLoad === loads
-    const requests = client.requests().filter((request) => !(quiet && request.priority === PRIORITY.list))
+    const requests = client.requests().filter((request) => request.group !== 'files-refresh' && !(quiet && request.priority === PRIORITY.list))
     const running = requests.some((request) => request.phase === 'running')
     return { phase: running ? 'running' : 'idle', cancellable: requests.some((request) => request.phase === 'running' && request.cancellable) }
   }
@@ -559,6 +572,57 @@ async function start(): Promise<void> {
       openProject,
     },
   })
+  const fileRefresher = createFilesRefresher({
+    clock: { now: () => Date.now(), setTimeout: (fn, ms) => setTimeout(fn, ms), clearTimeout: handle => clearTimeout(handle as ReturnType<typeof setTimeout>) },
+    visibility: documentVisibility(document), snapshot: () => shell.fileWatch(),
+    async stamps(watch, dirs) {
+      const query: Record<string, string | readonly string[]> = { dir: dirs }
+      if (watch.root !== undefined) query.root = watch.root
+      if (watch.file) query.path = watch.file.path
+      const result = await client.request({ path: '/api/files-stamp', query }, { priority: PRIORITY.background, share: false, group: 'files-refresh' })
+      if (result.kind !== 'passed' || typeof result.output !== 'object' || result.output === null) throw new Error('stamp failed')
+      const value = result.output as { dirs?: unknown; file?: unknown }
+      if (typeof value.dirs !== 'object' || value.dirs === null || !(value.file === null || typeof value.file === 'string')) throw new Error('invalid stamp')
+      return { dirs: value.dirs as Record<string, string | null>, file: value.file }
+    },
+    async changes(watch) {
+      if (!watch.changeKey) return ''
+      let query: Record<string, string>
+      if (watch.changeKey.startsWith('root:')) query = { root: watch.changeKey.slice(5) }
+      else {
+        const [kind, id, scope, overlay] = JSON.parse(watch.changeKey) as [string, string, string, boolean]
+        if (kind !== 'issue') throw new Error('invalid change key')
+        query = { id, scope, ...(overlay ? { worktree: '1' } : {}) }
+      }
+      const result = await client.request({ path: '/api/changes', query }, { priority: PRIORITY.background, share: false, group: 'files-refresh' })
+      if (result.kind !== 'passed' || typeof result.output !== 'object' || result.output === null || !Array.isArray((result.output as { files?: unknown }).files)) throw new Error('changes failed')
+      const value = result.output as { files: unknown[]; vcs_error?: unknown }
+      // A checkout's tab stands on the whole answer — the directories' letters, the cap, a checkout git cannot read — so the
+      // fingerprint is the whole of it: a letter that moves alone is a change, and a git-less checkout is one steady answer
+      // (not a failure the step would retry and flag on every round). An issue's pane stands on its files and their errors.
+      if (watch.changeKey.startsWith('root:')) {
+        const set = changeSetOf(value)
+        if (!set) throw new Error('invalid changes')
+        return changeFingerprint(set)
+      }
+      if (value.vcs_error) throw new Error('changes unavailable')
+      const files = changesOf(value)
+      if (!files) throw new Error('invalid changes')
+      return JSON.stringify(files)
+    },
+    cancel: () => client.cancelGroup('files-refresh'),
+    onBackoff: on => { filesBackoff = on; showBackoff() },
+    changedStamps: (watch, dirs, file, answer) => shell.refreshFileStamps(watch, dirs, file, answer),
+    changedChanges: (watch, fingerprint) => shell.refreshFileChanges(watch, fingerprint),
+  })
+  let watchSignature = ''
+  const wakeFileWatch = () => { const watch = shell.fileWatch(); const signature = watch ? JSON.stringify([watch.key, watch.changeKey ?? null, watch.file?.path ?? null]) : ''; if (signature !== watchSignature) { watchSignature = signature; if (!signature && filesBackoff) { filesBackoff = false; showBackoff() } fileRefresher.wake() } }
+  root.addEventListener('moai-file-watch', wakeFileWatch)
+  store.subscribe(wakeFileWatch)
+  document.addEventListener('keydown', () => fileRefresher.touch())
+  document.addEventListener('pointerdown', () => fileRefresher.touch())
+  window.addEventListener('pagehide', event => { if (!event.persisted) fileRefresher.stop() })
+  wakeFileWatch()
   client.subscribe(() => shell.activity(activity()))
   // The one keydown listener: keys → the key table's actions → the store and the panes (keys/wiring.ts), with the
   // SPC menu, the shortcut help and the "click to use the keyboard" hint.
@@ -637,7 +701,7 @@ async function start(): Promise<void> {
   // `resumable`), so neither is lost to the gap before the resumed stream's hello.
   void (async () => {
     browserId = await loadBrowserId()
-    events = openEvents({ url: eventUrl, onStamp: (at) => refresher.saw(at), onUp: () => refresher.pause(),
+    events = openEvents({ url: eventUrl, onStamp: (at) => { observeTracker(at); return refresher.saw(at) }, onUp: () => refresher.pause(),
       onDown: () => { refresher.resume() }, onVisible: () => { void refresher.check(); seen() },
       onHello: (hello) => { proposals.clear(); tab = { id: hello.tab, token: hello.token }; seen(false) },
       onCtl: ({ seq, request }) => {

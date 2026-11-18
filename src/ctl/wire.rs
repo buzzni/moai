@@ -145,6 +145,7 @@ impl Verb {
                     "gantt" => Some(Screen::Gantt),
                     "stats" => Some(Screen::Stats),
                     "wiki" => Some(Screen::Wiki),
+                    "files" => Some(Screen::Files),
                     _ => None,
                 };
                 screen.map_or_else(|| name.clone(), |screen| screen.word(lang).into())

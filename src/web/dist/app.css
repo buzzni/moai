@@ -24,6 +24,8 @@
   --glint-edge: var(--warn); --glint-core: #F2B01E;
   /* The TUI's branch colour, bright cyan (view/branch.ts). */
   --branch: #0891B2;
+  /* The file tab's source and script colours (the TUI's yellow and bright green; no existing token holds them). */
+  --file-source: #c2410c; --file-script: #4d7c0f;
 }
 @media (prefers-color-scheme: dark) {
   :root:not([data-theme="light"]) {
@@ -37,6 +39,7 @@
     --card-tint-strength: 28%;
     --glint-edge: var(--warn); --glint-core: #FFE7A3;
     --branch: #22D3EE;
+    --file-source: #fb923c; --file-script: #a3e635;
   }
 }
 :root[data-theme="dark"] {
@@ -50,6 +53,7 @@
   --card-tint-strength: 28%;
   --glint-edge: var(--warn); --glint-core: #FFE7A3;
   --branch: #22D3EE;
+  --file-source: #fb923c; --file-script: #a3e635;
 }
 
 :root {
@@ -65,6 +69,8 @@
   --radius: var(--saycode-radius, 10px);
   --radius-xs: 6px;
   --radius-card: 3px;
+  /* A dense row: the files tab tree draws its rows this tall (list.css sets its own --moai-row-h on .moai-list, also 24px). */
+  --moai-row-h: 24px;
   --font: var(--saycode-font, Inter, Pretendard, system-ui, -apple-system, "Segoe UI", sans-serif);
   --mono: "SF Mono", "JetBrains Mono", "Fira Code", ui-monospace, Menlo, monospace;
 
@@ -505,6 +511,125 @@ body.m-resizing:is([data-resize="bottom"], [data-resize="top"]) { cursor: row-re
 .m-card-line .m-id, .m-card-line .m-count { font: 12px var(--mono); color: var(--muted); }
 .m-card-title { margin-top: 5px; overflow-wrap: anywhere; }
 
+.m-diff { min-height: 0; height: 100%; display: flex; flex-direction: column; }
+/* The head is .m-panehead (files.css): `diff`, what is shown, the layout buttons on the right. */
+.m-diff-slot { display: inline-flex; align-items: center; gap: 6px; min-width: 0; overflow: hidden; text-overflow: ellipsis; font: 12px var(--mono); }
+.m-diff-body { flex: 1 1 0; min-height: 0; overflow: auto; font: 12px/20px var(--mono); }
+.m-diff-empty { margin: 0; padding: 8px 12px; font: 12px var(--font); color: var(--muted); }
+/* A file's head: 30px, a faint band. Chip, path and counts are text — the summary's own click is the only one. */
+.m-diff-head { display: flex; align-items: center; gap: 8px; box-sizing: border-box; height: 30px; padding: 0 12px; background: color-mix(in srgb, var(--text) 4%, var(--bg)); border-bottom: 1px solid var(--border-soft); font: 12px var(--mono); white-space: nowrap; cursor: pointer; list-style: none; }
+.m-diff-head::-webkit-details-marker { display: none; }
+.m-diff-head::before { content: "▸"; flex: none; width: 1ch; color: var(--muted); }
+.m-diff-file[open] > .m-diff-head::before { content: "▾"; }
+.m-diff-head:focus-visible { outline: 2px solid var(--accent); outline-offset: -2px; }
+.m-diff-chip { display: inline-flex; align-items: center; justify-content: center; flex: none; width: 18px; height: 18px; border-radius: 4px; background: color-mix(in srgb, currentColor 14%, var(--bg)); color: var(--muted); font: 700 11px var(--mono); }
+.m-diff-path { flex: 1 1 auto; min-width: 0; overflow: hidden; text-overflow: ellipsis; font-weight: 600; color: var(--text); }
+.m-diff-counts { display: inline-flex; gap: 6px; flex: none; }
+.m-diff-hunk { min-width: max-content; padding: 0 12px; color: var(--accent); background: color-mix(in srgb, var(--accent) 6%, var(--bg)); white-space: pre; }
+.m-diff-line { display: flex; min-width: max-content; white-space: pre; }
+.m-diff-add { background: var(--ok-soft); }
+.m-diff-delete { background: var(--danger-soft); }
+/* The number cell sticks to the left edge when the lines scroll sideways, in the line's own band so no text shows through it. */
+.m-diff-no { position: sticky; left: 0; flex: none; width: 4ch; box-sizing: content-box; text-align: right; padding-right: 6px; background: var(--bg); color: var(--muted); }
+.m-diff-add .m-diff-no { background: var(--ok-soft); color: var(--ok); }
+.m-diff-delete .m-diff-no { background: var(--danger-soft); color: var(--danger); }
+.m-diff-sign { flex: none; width: 2ch; text-align: center; }
+.m-diff-add .m-diff-sign { color: var(--ok); }
+.m-diff-delete .m-diff-sign { color: var(--danger); }
+/* Each side is at least as wide as its longest line: a 0 minimum let a long old line paint over the new side. */
+.m-diff-pairs { display: grid; grid-template-columns: repeat(2, minmax(max-content, 1fr)); }
+/* The list pane's scope buttons: one line of buttons, the pressed one in the Gantt segment's look (gantt.css .g-seg). */
+.m-pane-diff { display: flex; flex-direction: column; min-height: 0; height: 100%; }
+.m-pane-diff > .m-diff { flex: 1 1 0; }
+.m-diff-scopes { display: inline-flex; flex-wrap: nowrap; border: 1px solid var(--border); border-radius: 7px; overflow: hidden; }
+.m-diff-scopes:empty { display: none; }
+.m-diff-scopes button { border: 0; background: transparent; color: var(--muted); font: 500 12px var(--font); height: 22px; padding: 0 8px; cursor: pointer; white-space: nowrap; }
+.m-diff-scopes button + button { border-left: 1px solid var(--border); }
+.m-diff-scopes button:hover { background: var(--hover); color: var(--text); }
+.m-diff-scopes button[aria-pressed="true"] { background: var(--selected); color: var(--text); font-weight: 600; }
+.m-diff-scopes button:focus-visible { outline: 2px solid var(--accent); outline-offset: -2px; }
+.m-diff-collapsed { margin: 0; padding: 8px 12px; font-size: 12px; color: var(--muted); }
+/* A read's state in one line (moai-dy7a.lb0): the list's under the pane head, a file's under its own head. The row holds
+   its height from the start, so the spinner standing a moment later moves nothing below it. The spinner is
+   components.css .m-spin; with reduced motion the glyph stands still and the word beside it says the rest. */
+.m-diff-state { display: flex; flex-wrap: wrap; align-items: center; gap: 4px 8px; box-sizing: border-box; min-height: 30px; padding: 4px 12px; font: 12px var(--font); color: var(--muted); }
+.m-diff-spin { display: inline-block; flex: none; width: 1ch; font-family: var(--mono); }
+.m-diff-failed { color: var(--danger); }
+.m-diff-failed > span { min-width: 0; overflow-wrap: anywhere; }
+.m-diff-retry { flex: none; height: 22px; padding: 0 8px; border: 1px solid var(--border); border-radius: 6px; background: var(--bg); color: var(--text); font: 500 12px var(--font); cursor: pointer; }
+.m-diff-retry:hover { background: var(--hover); }
+.m-diff-retry:focus-visible { outline: 2px solid var(--accent); outline-offset: 1px; }
+/* The terminal line goes on a line of its own, selectable whole. */
+.m-diff-cmd { display: flex; align-items: center; gap: 6px; flex: 1 0 100%; min-width: 0; }
+.m-diff-cmd code { min-width: 0; overflow-x: auto; padding: 2px 6px; border-radius: 4px; background: color-mix(in srgb, var(--text) 6%, var(--bg)); color: var(--text); font: 12px var(--mono); white-space: pre; user-select: all; }
+
+.m-pane-files { min-height: 0; height: 100%; }
+/* The toolbar (40px) stands over the split; :not([hidden]) so the flex does not undo .m-tabpanel[hidden]. */
+.m-pane-files:not([hidden]) { display: flex; flex-direction: column; }
+.m-pane-files > .m-split { flex: 1 1 0; min-height: 0; height: auto; }
+.m-pane-files > .m-split > .m-split-list { display: flex; flex-direction: column; overflow: hidden; }
+.m-files-tree, .m-files-content { height: 100%; overflow: auto; }
+.m-pane-files > .m-split > .m-split-list > .m-files-tree { flex: 1 1 0; min-height: 0; height: auto; }
+/* A tree row is the list's row (components.css .m-row) at the list's height and selection band, drawn from the same
+   tokens: --moai-row-h (tokens.css, as list.css) and --accent. The row stays a button; its fold is a span, so nothing nests. */
+.m-files-row { width: 100%; border: 0; text-align: left; font: inherit; background: transparent; }
+.m-files-tree > .m-row { height: var(--moai-row-h); }
+.m-files-tree > .m-row[aria-selected="true"]::before { width: 4px; background: var(--accent); border-radius: 0 2px 2px 0; }
+.m-files-row:disabled { opacity: .5; }
+.m-files-tree > .m-row > .m-files-name { align-self: stretch; line-height: var(--moai-row-h); }
+/* Always there, empty or not, so the names start in one column; the letter's colour is a .m-mark-* class. */
+.m-files-c-mark { flex: none; width: 1.5ch; text-align: center; font: 600 12px var(--mono); color: var(--muted); }
+.m-files-fold { display: inline-flex; align-items: center; justify-content: center; flex: none; width: 16px; height: 16px; vertical-align: middle; }
+.m-files-fold.moai-toggle { pointer-events: none; }
+.m-files-row[aria-expanded="true"] .moai-toggle .m-icon { transform: rotate(90deg); }
+.m-files-gone { color: var(--muted); text-decoration: line-through; }
+.m-files-from, .m-files-faint { opacity: .6; }
+.m-files-content { font: 12px/20px var(--mono); }
+.m-file-line { display: flex; min-width: max-content; white-space: pre; }
+.m-file-number { position: sticky; left: 0; min-width: 4ch; text-align: right; padding-right: 1ch; background: var(--bg); color: var(--muted); }
+.m-syntax-comment { color: var(--ok); } .m-syntax-string { color: var(--warn); } .m-syntax-keyword { color: var(--accent); } .m-syntax-number { color: var(--muted); }
+.m-pane-files { container: files / inline-size; }
+@container files (max-width: 639px) {
+  .m-split-detail, .m-split-resizer { display: none; }
+  .m-files-show-content .m-split-list { display: none; }
+  .m-files-show-content .m-split-detail { display: block; }
+}
+.m-files-kind-directory { color: var(--accent); font-weight: bold; }
+.m-files-kind-link { color: var(--branch); }
+.m-files-kind-source { color: var(--file-source); }
+.m-files-kind-doc { color: var(--review); }
+.m-files-kind-data { color: var(--ok); }
+.m-files-kind-script { color: var(--file-script); }
+.m-files-kind-binary { color: var(--muted); }
+.m-files-kind-plain { color: var(--text); }
+/* Status letters (changed files, diff headers) and the +n / −n counts; shared with diff.css, which is bundled with this sheet. */
+.m-mark-M { color: var(--warn); } .m-mark-A { color: var(--ok); } .m-mark-D { color: var(--danger); } .m-mark-R { color: var(--branch); }
+.m-count-add { color: var(--ok); } .m-count-del { color: var(--danger); }
+/* Toolbar: 40px, a soft rule under it: checkout select · always-visible search · separator · icon toggles. */
+.m-files-toolbar { display: flex; align-items: center; gap: 8px; box-sizing: border-box; height: 40px; flex: none; padding: 0 8px; border-bottom: 1px solid var(--border-soft); }
+.m-files-field { position: relative; display: inline-flex; align-items: center; min-width: 0; }
+.m-files-field > .m-icon { position: absolute; left: 8px; width: 14px; height: 14px; color: var(--muted); pointer-events: none; }
+.m-files-checkout { flex: 0 1 auto; max-width: 45%; }
+.m-files-find { flex: 1 1 120px; max-width: 280px; }
+.m-files-field select, .m-files-field input { box-sizing: border-box; width: 100%; min-width: 0; height: 28px; padding: 0 8px 0 28px; border: 1px solid var(--border); border-radius: 6px; background: var(--bg); color: var(--text); font: 12px var(--mono); }
+.m-files-field select { text-overflow: ellipsis; }
+.m-files-field input::placeholder { color: var(--muted); font-family: var(--font); }
+.m-files-field select:focus-visible, .m-files-field input:focus-visible { outline: 2px solid var(--accent); outline-offset: -1px; }
+.m-files-sep { flex: none; width: 1px; height: 16px; background: var(--border); }
+/* One line of faint ink: a read failure, a cut, the number of matches. Gone when empty. */
+.m-files-message { padding: 4px 12px; font-size: 12px; color: var(--muted); }
+.m-files-message:empty { display: none; }
+/* The pane head (diff.css's too): 32px, 12px faint text, only the name bold. */
+.m-panehead { display: flex; align-items: center; gap: 8px; box-sizing: border-box; height: 32px; flex: none; padding: 0 8px 0 12px; border-bottom: 1px solid var(--border-soft); font-size: 12px; color: var(--muted); white-space: nowrap; overflow: hidden; }
+.m-panehead b { color: var(--text); font-weight: 600; overflow: hidden; text-overflow: ellipsis; }
+.m-panehead-sp { flex: 1; }
+.m-files-right, .m-files-issue { min-height: 0; height: 100%; overflow: auto; }
+.m-files-right { display: flex; flex-direction: column; overflow: hidden; }
+.m-files-right > :not(.m-panehead, .m-files-collapsed) { flex: 1 1 0; min-height: 0; height: auto; }
+.m-files-right > .m-files-content, .m-files-right > .m-files-issue { overflow: auto; }
+.m-files-collapsed { margin: 0; padding: 8px 12px; font-size: 12px; color: var(--muted); }
+.m-files-right > .m-split { height: 100%; }
+
 /*
  * The gantt tab (view/gantt.ts): a toolbar, one scroll box holding two columns — the grid (left, sticky, so it never
  * moves sideways) and the dates — and a legend. Ported from the mockup the person confirmed
@@ -899,6 +1024,9 @@ svg.links polygon { fill: var(--link); }
 
 /* ---- Panes: the list and board each scroll on their own, so a tab change keeps each one's offset. ---- */
 .m-shell .m-split-list { display: flex; flex-direction: column; overflow: hidden; }
+/* The detail and the diff share the outer detail place as an inner split (shell.ts). The outer detail is a block, so without a height
+   the inner split sizes to its content and a short detail cuts the diff off short of the place's end (moai-5tgg). */
+.m-shell .m-split-detail > .m-split { height: 100%; }
 .m-pane-main { flex: 1 1 auto; min-height: 0; overflow: auto; }
 .m-pane-main[data-pane="list"]:not([hidden]), .m-pane-main[data-pane="board"]:not([hidden]) { display: flex; flex-direction: column; }
 .m-pane-main[data-pane="list"] > :not(.m-fill), .m-pane-main[data-pane="board"] > :not(.m-fill) { flex: none; }

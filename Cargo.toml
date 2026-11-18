@@ -6,7 +6,7 @@ members = ["crates/moai-gantt"]
 
 [package]
 name = "moai"
-version = "1.3.0"
+version = "1.4.0"
 edition = "2024"
 description = "이슈 트래커. 승인 게이트 없음. 규율은 `moai status` 가 비춘다."
 license = "MIT"
@@ -26,6 +26,11 @@ doctest = false
 workspace = true
 
 [dependencies]
+# Syntax parsing only: pure-Rust regex, no onig, themes, HTML, plist or YAML loader.
+# moai-vyu7.s4m, 2026-11-17: clean release before 21,132,056 B / 347.45 s;
+# after 23,953,456 B / 367.97 s with syntax paths linked (+2,821,400 B / 20.52 s).
+syntect = { version = "=5.3.0", default-features = false, features = ["parsing", "dump-load", "regex-fancy"] }
+two-face = { version = "=0.5.2", default-features = false, features = ["syntect-fancy"] }
 # Picture codecs are pure Rust; keep AVIF/EXR/TIFF/rayon out of the binary.
 # 2026-11-02: before 13,641,968 B; after image support 14,302,528 B (+660,560 B,
 # 91% of 15 MiB). This is the cost at introduction, not the current size.

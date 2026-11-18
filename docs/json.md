@@ -171,6 +171,12 @@ each raised row's `due_on`, with `due_from` naming the ancestor when it is not t
 own; on `moai status --json` the `due_priority_behind` notice carries it per id in
 `deadlines`, beside the days left in `ages`.
 
+## Read an issue's changes
+
+`moai diff <id> --json` returns one object with `id`, the selected `scope` (`commits`, `branch`, `working`, or `null`), `offers`, `files`, `total`, and `truncated`. Offers are in selection order and carry `scope`, checkout key, branch, and owner. A `vcs_error` object with `kind` and `said` appears only when Git could not be read.
+
+Each file has `path`, `old_path`, `status`, `adds`, `dels`, `binary`, and `hunks`. A hunk has `old_start`, `old_len`, `new_start`, `new_len`, `section`, and `lines`; each line has `kind`, `old_no`, `new_no`, `text`, and `no_newline`. Counts and line numbers may be `null`. `--stat` omits `hunks`; `total` counts files before the 5,000-file limit, and `truncated` also reports a limited patch.
+
 ## Read wiki issue references
 
 `moai wiki ls --json` and `moai wiki show <slug> --json` carry `issues` for

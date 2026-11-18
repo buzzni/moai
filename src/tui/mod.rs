@@ -5,8 +5,11 @@
 
 mod archive_days;
 pub mod board;
+mod columns;
+mod diff;
 pub mod draw;
 pub mod edit;
+mod files;
 pub mod form;
 mod gantt;
 mod help;
@@ -20,6 +23,7 @@ pub mod keys;
 pub mod layer;
 pub mod menu;
 mod mouse;
+mod pace;
 pub mod picker;
 pub mod register;
 pub mod scroll;
@@ -228,6 +232,9 @@ pub enum Mode {
     /// `SPC g w` 가 연 위키 창(moai-o3cb). 통계 창과 같은 덮는 창이다 — 읽기만 하고, 열 때마다 새로 읽고, 설정에 안
     /// 남는다. 상자에 담는 까닭도 같다: 페이지 본문을 통째로 든다.
     Wiki(Box<wiki::Window>),
+    /// `SPC g f` 가 연 파일 창(moai-ffk9.rpf). 위키 창과 같은 덮는 창이다 — 읽기만 하고, 열 때마다 새로 읽는다. 읽기는
+    /// 창이 띄운 실이 한다(`files::Worker`).
+    Files(Box<files::Window>),
 }
 
 /// 걸린 거름망 — 사람이 친 글 그대로와, 그것이 검색(`/`)인지 거름망(`f`)인지(moai-lpzj.i7i).
@@ -356,24 +363,31 @@ pub enum Pane {
     Explorer,
     /// 오른쪽 상세.
     Detail,
+    /// The list's diff pane (moai-ffk9.cij, `SPC v D`) — beside the detail, after it.
+    Diff,
 }
 
 impl Pane {
     /// `Tab` 이 도는 차례.
-    pub const ALL: [Pane; 2] = [Pane::Explorer, Pane::Detail];
+    pub const ALL: [Pane; 3] = [Pane::Explorer, Pane::Detail, Pane::Diff];
 
-    fn at(self) -> usize {
-        Pane::ALL.iter().position(|p| *p == self).unwrap_or(0)
+    /// The panes in `standing` (and this one) in [`Pane::ALL`]'s order.
+    fn ring(self, standing: &[Pane]) -> Vec<Pane> {
+        Pane::ALL.into_iter().filter(|p| *p == self || standing.contains(p)).collect()
     }
 
-    /// 다음 칸. 끝에서 처음으로 돈다.
-    pub fn next(self) -> Pane {
-        Pane::ALL[(self.at() + 1) % Pane::ALL.len()]
+    /// 다음 칸. 끝에서 처음으로 돈다. **선 칸만 돈다**(moai-ffk9.cij) — 숨긴 상세나 접힌 diff 는 건너뛴다.
+    pub fn next(self, standing: &[Pane]) -> Pane {
+        let ring = self.ring(standing);
+        let at = ring.iter().position(|p| *p == self).unwrap_or(0);
+        ring[(at + 1) % ring.len()]
     }
 
     /// 앞 칸. 처음에서 끝으로 돈다.
-    pub fn prev(self) -> Pane {
-        Pane::ALL[(self.at() + Pane::ALL.len() - 1) % Pane::ALL.len()]
+    pub fn prev(self, standing: &[Pane]) -> Pane {
+        let ring = self.ring(standing);
+        let at = ring.iter().position(|p| *p == self).unwrap_or(0);
+        ring[(at + ring.len() - 1) % ring.len()]
     }
 
     /// 한 칸 그쪽으로. **이웃이 없으면 제자리다** — vi 의 `Ctrl-w h`·`j`·`k`·`l` 이 그렇다.
@@ -384,7 +398,11 @@ impl Pane {
     /// **가른 축이 아닌 방향은 제자리다**(moai-x7pa) — 좌우로 갈랐으면 `j`·`k` 가, 위아래로
     /// 갈랐으면 `h`·`l` 이 vim 그대로 안 움직인다. 어느 자리에서든 `Ctrl-w w`
     /// (`Browse::FocusNext`)는 돈다.
-    pub fn step(self, side: keys::Side, at: view::DetailAt) -> Pane {
+    ///
+    /// **The diff stands after the detail on the same axis** (moai-ffk9.cij, `draw::side_split`): the picture is
+    /// list · detail · diff, or detail · diff · list when the detail comes first. Only the standing panes are
+    /// neighbours.
+    pub fn step(self, side: keys::Side, at: view::DetailAt, standing: &[Pane]) -> Pane {
         use keys::Side::*;
         // 가른 축과 누른 방향의 축이 다르면 이웃이 없다 — 재는 자는 [`keys::Side::on_axis`]
         // 하나고, `Browse::enabled` 가 "이 키가 서는가" 를 같은 자로 가른다.
@@ -392,10 +410,16 @@ impl Pane {
             return self;
         }
         // 앞에 선 칸이 **왼쪽이자 위**다 — 가른 축 하나로 두 방향을 같이 읽는다.
-        let (first, last) = if at.first() { (Pane::Detail, Pane::Explorer) } else { (Pane::Explorer, Pane::Detail) };
+        let picture = if at.first() {
+            [Pane::Detail, Pane::Diff, Pane::Explorer]
+        } else {
+            [Pane::Explorer, Pane::Detail, Pane::Diff]
+        };
+        let line: Vec<Pane> = picture.into_iter().filter(|p| *p == self || standing.contains(p)).collect();
+        let here = line.iter().position(|p| *p == self).unwrap_or(0);
         match side {
-            Left | Up => first,
-            Right | Down => last,
+            Left | Up => line[here.saturating_sub(1)],
+            Right | Down => line[(here + 1).min(line.len() - 1)],
         }
     }
 
@@ -409,6 +433,7 @@ impl Pane {
                 view::Layout::List => crate::i18n::say(lang, "tui.pane.list"),
             },
             Pane::Detail => crate::i18n::say(lang, "tui.pane.detail"),
+            Pane::Diff => crate::i18n::say(lang, "tui.pane.diff"),
         }
     }
 }
@@ -1709,6 +1734,27 @@ pub struct App {
     /// 상세를 켜는 일까지 하게 된다. 숨겼을 때 자리가 아예 없다는 판단(moai-ymnu)은 그대로다 —
     /// 이 값은 그때 그리는 쪽이 안 본다. 설정에 남는다.
     pub detail_at: view::DetailAt,
+    /// How every diff on screen stands — unified or side by side, `SPC o s` (moai-ffk9.41b). One value for the file
+    /// window's pane and the list's: the person's way of reading a diff, not a pane's. Kept in `[tui] diff_layout`;
+    /// a pane too narrow for side by side draws unified without touching this.
+    pub diff_layout: diff::Layout,
+    /// The list's diff pane stands (moai-ffk9.cij, `SPC v D`) — beside the detail, after it (`draw::side_split`).
+    /// Kept in `[tui] diff` once pressed; off until then. Apart from [`App::detail_open`]: each stands with or
+    /// without the other.
+    pub diff_open: bool,
+    /// The diff's share (%) of the side pane when it shares it with the detail — side by side and stacked, apart
+    /// like [`App::list_width`]·[`App::list_height`]. `None` until the line between the two is dragged: half.
+    pub diff_width: Option<u16>,
+    pub diff_height: Option<u16>,
+    /// The last frame folded the diff — on, but the side pane too small for the detail and the diff (the detail
+    /// stays, the person's answer). The setting stays on; the focus does not stand on it and no read goes out.
+    diff_folded: bool,
+    /// The list's diff pane — what it shows and its read thread (`diff::View`). Fed the cursor's row each frame it
+    /// stands ([`App::aim_diff`]); closed while it does not, so nothing runs for a pane no one sees.
+    pub(crate) diff: diff::View,
+    /// The issues handed to the diff's reads, shared — rebuilt only when the project's tracker was read again,
+    /// so the cursor run down the list does not copy every issue at each row.
+    diff_issues: Option<(std::path::PathBuf, Stamp, usize, std::sync::Arc<Vec<Issue>>)>,
     /// 목록을 줄로 세우나 칸반 보드로 세우나 — `SPC g l`·`b`(moai-9nfw·moai-z46r). **새 창이 아니라 배치다**: 커서·거름망·
     /// 보기·상세는 둘이 한 벌이고, 이것은 [`App::rows`] 가 무엇을 내고 그림과 이동이 그것을 어디에 세우는가만
     /// 가른다. 한눈 보기에서는 프로젝트마다 머리줄이 서는 보드다(moai-oagj.vcj). 설정에 남는다.
@@ -1767,6 +1813,11 @@ pub struct App {
     /// 목록·상세의 몫([`App::list_width`])과 **따로다**(2026-10-04 사용자 결정). 끈 적 없으면 `None` 이고 그동안 위키
     /// 창은 `list_width` 를 따른다 — 끌기 전에는 이 에픽 전과 같은 폭이다.
     pub wiki_width: Option<u16>,
+    /// The file window's tree share (%) — dragged on that window's line and kept apart from the list's, as the wiki
+    /// window's is (moai-ffk9.rpf). `None` until dragged; the window follows `list_width` meanwhile.
+    pub files_width: Option<u16>,
+    /// What the file window reads with — the disk, or a test's stand-in (`files::Disk`).
+    pub(crate) files_disk: files::Disk,
     /// 칸 사이 선을 잡고 끄는 중이면 잡은 자리([`mouse::Grab`]). 놓을 때 한 번 설정에 적는다 — 끄는 동안의 칸마다
     /// 적으면 손짓 하나가 파일을 수십 번 다시 쓴다. 놓친 뗌은 다음 마우스 사건이나 다음 키가 대신한다(`App::drop_line`).
     dragging: Option<mouse::Grab>,
@@ -1997,7 +2048,7 @@ impl App {
                     return Reply::error("unsupported", "unknown or unsafe explorer action");
                 }
                 if let Some(Verb::View { name, .. }) = then.as_deref()
-                    && !matches!(name.as_str(), "deferred" | "backlog" | "archived" | "worktree" | "raw")
+                    && !matches!(name.as_str(), "deferred" | "backlog" | "archived" | "worktree" | "raw" | "diff")
                     && !name
                         .strip_prefix("column:")
                         .is_some_and(|column| self.screen_statuses().iter().any(|s| s == column))
@@ -2128,6 +2179,7 @@ impl App {
                         "gantt" => keys::Screen::Gantt,
                         "stats" => keys::Screen::Stats,
                         "wiki" => keys::Screen::Wiki,
+                        "files" => keys::Screen::Files,
                         _ => return Err(bad("unknown screen".into())),
                     };
                     changed = self.ctl_screen() != name;
@@ -2140,6 +2192,12 @@ impl App {
                             self.notice.clone().unwrap_or_else(|| "wiki could not open".into()),
                         ));
                     }
+                    if name == "files" && !matches!(self.mode, Mode::Files(_)) {
+                        return Err(Reply::error(
+                            "refused",
+                            self.notice.clone().unwrap_or_else(|| "files could not open".into()),
+                        ));
+                    }
                 }
                 Verb::View { name, on } => {
                     let (was, act) = match name.as_str() {
@@ -2148,6 +2206,11 @@ impl App {
                         "archived" => (self.view.show_archived, B::Archived),
                         "worktree" => (self.worktree, B::Worktree),
                         "raw" => (self.raw, B::Raw),
+                        // Over the file window `SPC v D` is its right pane's diff (moai-ffk9.211), so the verb is too.
+                        "diff" => match &self.mode {
+                            Mode::Files(w) => (w.diff_on, B::Diff),
+                            _ => (self.diff_open, B::Diff),
+                        },
                         _ if name.starts_with("column:") => {
                             let column = &name[7..];
                             let at = self
@@ -2170,7 +2233,10 @@ impl App {
                         return Ok(());
                     }
                     changed = was != *on;
-                    if changed {
+                    if let (B::Diff, Mode::Files(w)) = (act, &mut self.mode) {
+                        // Asked for the state it has, the pane is still the asker's (moai-p7nr.sw0).
+                        if changed { w.toggle_diff() } else { w.claim_diff() }
+                    } else if changed {
                         let rows = self.rows();
                         self.run(act, &rows);
                     }
@@ -2469,6 +2535,7 @@ impl App {
             Mode::Browse => false,
             Mode::Stats(w) => !w.chord.held().is_empty(),
             Mode::Wiki(w) => w.typing.is_some() || w.choose.is_some() || !w.chord.held().is_empty(),
+            Mode::Files(w) => w.typing.is_some() || !w.chord.held().is_empty(),
             _ => true,
         }
     }
@@ -2650,7 +2717,30 @@ impl App {
             Screen::Gantt => "gantt",
             Screen::Stats => "stats",
             Screen::Wiki => "wiki",
+            Screen::Files => "files",
         }
+    }
+
+    /// The list's diff pane as `moai ctl state` gives it (moai-ffk9.cij): on, folded, the layout, and what it shows —
+    /// the scope and the scopes in their order, the words `moai diff <id> --json` uses (`scope`·`offers`), and the
+    /// file count once read.
+    fn diff_state(&self) -> serde_json::Value {
+        let (offers, at) = self.diff.offers();
+        let id = match self.diff.source() {
+            Some(diff::Source::Issue { id, .. }) => Some(id.clone()),
+            _ => None,
+        };
+        let loaded = self.diff.loaded();
+        serde_json::json!({
+            "shown": self.diff_open,
+            "folded": self.diff_folded,
+            "layout": self.diff_layout.word(),
+            "id": id,
+            "scope": at,
+            "offers": offers.iter().map(|o| o.scope).collect::<Vec<_>>(),
+            "files": loaded.filter(|l| l.failed.is_none()).map(|l| l.total),
+            "reading": matches!(self.diff.shown, diff::Shown::Reading { .. }),
+        })
     }
 
     pub fn ctl_state(&self, include_rows: bool) -> serde_json::Value {
@@ -2675,6 +2765,7 @@ impl App {
             Mode::Sort(..) => "sort",
             Mode::Stats(..) => "stats",
             Mode::Wiki(..) => "wiki",
+            Mode::Files(..) => "files",
         };
         let filter = match &self.hung {
             Some(Hung::Grep { text, scope }) => {
@@ -2700,13 +2791,14 @@ impl App {
             match &self.mode {
                 Mode::Stats(w) => w.chord.held(),
                 Mode::Wiki(w) => w.chord.held(),
+                Mode::Files(w) => w.chord.held(),
                 _ => self.chord.held(),
             }
         };
         let mut state = serde_json::json!({
             "screen": self.ctl_screen(), "path": path,
             "cursor": rows.get(self.cursor).and_then(id_of),
-            "focus": if self.focus == Pane::Explorer { "list" } else { "detail" },
+            "focus": match self.focus { Pane::Explorer => "list", Pane::Detail => "detail", Pane::Diff => "diff" },
             "mode": mode,
             "menu": if held.is_empty() { serde_json::Value::Null } else { serde_json::json!(held.iter().copied().map(keys::name_of_key).collect::<Vec<_>>().join(" ")) },
             "filter": filter, "sort": self.common_order().item.iter().map(ToString::to_string).collect::<Vec<_>>(), "order": self.common_order().to_string(), "group": self.sort.current.group.name(),
@@ -2714,10 +2806,13 @@ impl App {
                 "backlog": !self.view.hide_backlog, "archived": self.view.show_archived, "worktree": self.worktree},
             "cells": view::Field::ALL.into_iter().filter(|f| self.fields.shows(*f)).map(|f| f.name()).collect::<Vec<_>>(),
             "detail": {"shown": self.detail_open, "at": self.detail_at.name()},
+            "diff": self.diff_state(),
             "panes": {"list_width": self.list_width, "list_height": self.list_height,
-                "wiki_width": self.wiki_width, "gantt_label": self.gantt_label},
+                "wiki_width": self.wiki_width, "files_width": self.files_width, "gantt_label": self.gantt_label,
+                "diff_width": self.diff_width, "diff_height": self.diff_height},
             "mouse": self.mouse_on, "timezone": self.saved_zone,
             "wiki": if let Mode::Wiki(w) = &self.mode { w.ctl_state() } else { serde_json::Value::Null }, "unread": self.site.unread.len(),
+            "files": if let Mode::Files(w) = &self.mode { w.ctl_state() } else { serde_json::Value::Null },
             "notice": self.notice, "trouble": self.trouble,
             "proposals": self.proposals.rows().iter().map(crate::ctl::proposal::Entry::value).collect::<Vec<_>>(),
         });
@@ -3451,6 +3546,22 @@ impl App {
             fields: Default::default(),
             detail_open: true,
             detail_at: view::DetailAt::default(),
+            diff_layout: diff::Layout::default(),
+            diff_open: false,
+            diff_width: None,
+            diff_height: None,
+            diff_folded: false,
+            // Tests never run git here: a pane they turn on reads with the stand-ins they put in.
+            diff: if cfg!(test) {
+                diff::View::with(
+                    std::sync::Arc::new(|_: &diff::Source, _, _, _| diff::Loaded::default()),
+                    std::sync::Arc::new(|_: &crate::diff::FileDiff| None),
+                    crate::i18n::Lang::default(),
+                )
+            } else {
+                diff::View::new(crate::i18n::Lang::default())
+            },
+            diff_issues: None,
             layout: view::Layout::default(),
             chart: moai_gantt::GanttState { fitting: true, ..Default::default() },
             plan_move: None,
@@ -3464,6 +3575,8 @@ impl App {
             list_width: None,
             list_height: None,
             wiki_width: None,
+            files_width: None,
+            files_disk: files::Disk::default(),
             dragging: None,
             offer_aim: hint::Aim::default(),
             completion: None,
@@ -3879,6 +3992,7 @@ impl App {
         let watching = match &self.mode {
             Mode::Browse | Mode::Stats(_) => true,
             Mode::Wiki(w) => w.typing.is_none(),
+            Mode::Files(w) => w.typing.is_none(),
             _ => false,
         };
         if self.notice.is_some() || !watching {
@@ -3912,14 +4026,23 @@ impl App {
 
     /// 스레드에서 짓고 있는 다시 읽기가 있는가. 루프가 이 동안은 더 자주 깨어 받는다.
     pub fn loading(&self) -> bool {
-        self.pending.is_some() || self.layer_loading() || self.history.loading()
+        self.pending.is_some()
+            || self.layer_loading()
+            || self.history.loading()
+            || self.reading_files()
+            || self.diff.busy()
     }
 
     /// How long the history read has run, when it is the only background job left — a slow one can be polled less often
     /// (`cmd::tui`'s `history_poll`). `None` while anything else runs: the others keep the fast poll. The clock is the
     /// read's own, so a read that follows another gets its grace too.
     pub fn history_alone(&self) -> Option<std::time::Duration> {
-        let others = self.pending.is_some() || self.layer_loading() || self.reaping() || self.gathering_commits();
+        let others = self.pending.is_some()
+            || self.layer_loading()
+            || self.reaping()
+            || self.gathering_commits()
+            || self.reading_files()
+            || self.diff.busy();
         if others { None } else { self.history.waited() }
     }
 
@@ -4325,6 +4448,12 @@ impl App {
         // 펼친 프로젝트의 줄도 스레드에서 온다(moai-12yx) — 요약과 따로 돈다.
         self.follow_site();
         self.follow_commits();
+        self.follow_files();
+        // The list's diff pane takes its read's answer and colours (moai-ffk9.cij) — nothing while it is closed.
+        self.follow_changed |= self.diff.follow();
+        // …and reads itself again at the refresh's pace (moai-ffk9.15v) — never while the commit table's git runs.
+        let gathering = self.gathering_commits();
+        self.diff.refresh(!gathering);
         self.follow_latest();
         self.follow_changed |= self.history.poll();
         // **상세가 그린 이력의 저널도 본다**(moai-w7ms 리뷰) — 다시 읽을지는 그리는 자(`draw::fill_history`)가 가르는데,
@@ -4505,6 +4634,9 @@ impl App {
                 Ok(table) => {
                     self.follow_changed = true;
                     self.commits_job = None;
+                    // The table comes again when a `HEAD` moved: the diff pane's `commits` and `branch` scopes read
+                    // again (moai-ffk9.15v).
+                    self.diff.moved();
                     // **뿌리마다 덮는다.** `commit_tables` 는 이번에 git 이 답을 안 준 뿌리를
                     // 통째로 빼고 오므로(`.ok()`), 받은 것을 그대로 넣으면 한 번 어긋난 걸음에
                     // 옛 표가 사라져 커밋 칸이 말없이 빈다 — 다음 표는 표식이 움직여야 온다.
@@ -4635,7 +4767,8 @@ impl App {
             | Mode::ArchiveDays(_)
             | Mode::Sort(_)
             | Mode::Stats(_)
-            | Mode::Wiki(_) => String::new(),
+            | Mode::Wiki(_)
+            | Mode::Files(_) => String::new(),
         };
         if text.trim().is_empty() {
             self.hung = None;
@@ -4718,7 +4851,8 @@ impl App {
             | Mode::ArchiveDays(_)
             | Mode::Sort(_)
             | Mode::Stats(_)
-            | Mode::Wiki(_) => Raw::default(),
+            | Mode::Wiki(_)
+            | Mode::Files(_) => Raw::default(),
         };
         // **`Filter::build` 를 지난다.** 소문자 접기·태그 정규화·`항목=값` 해석이
         // 전부 거기 있고, 건너뛰면 CLI 와 TUI 가 같은 글을 다르게 읽는다. 거절문도 CLI 와 같은 자가
@@ -5383,6 +5517,20 @@ impl App {
         if let Some(at) = look.detail_at.as_deref().and_then(view::DetailAt::named) {
             self.detail_at = at;
         }
+        // An unknown word stands unified and the line stays — the detail's place's way.
+        if let Some(l) = look.diff_layout.as_deref().and_then(diff::Layout::parse) {
+            self.diff_layout = l;
+        }
+        // The list's diff pane (moai-ffk9.cij) — off, the focus leaves it as it leaves a hidden detail.
+        if let Some(on) = look.diff {
+            self.diff_open = on;
+            if !on {
+                if self.focus == Pane::Diff {
+                    self.focus = Pane::Explorer;
+                }
+                self.diff.close();
+            }
+        }
         // 모르는 낱말은 목록 그대로다 — 상세의 자리와 같은 결이다.
         if let Some(l) = look.layout.as_deref().and_then(view::Layout::named)
             && l != self.layout
@@ -5403,6 +5551,9 @@ impl App {
         self.list_width = look.list_width.map(draw::share);
         self.list_height = look.list_height.map(draw::share);
         self.wiki_width = look.wiki_width.map(draw::share);
+        self.files_width = look.files_width.map(draw::share);
+        self.diff_width = look.diff_width.map(draw::share);
+        self.diff_height = look.diff_height.map(draw::share);
         // 간트의 고정 칸 폭은 칸 수다(moai-i4hf.exq) — 0 과 음수는 1 로, 터무니없이 큰 값은 그릴 때 위젯이 창에 맞춘다.
         self.gantt_label = look.gantt_label.map(|w| w.clamp(1, i64::from(u16::MAX)) as u16);
         if let Some(w) = self.gantt_label {
@@ -5461,12 +5612,17 @@ impl App {
             fields_known: Some(view::Field::ALL.into_iter().map(|f| f.name().to_string()).collect()),
             detail: Some(self.detail_open),
             detail_at: Some(self.detail_at.name().to_string()),
+            diff_layout: Some(self.diff_layout.word().to_string()),
+            diff: Some(self.diff_open),
+            diff_width: self.diff_width.map(i64::from),
+            diff_height: self.diff_height.map(i64::from),
             layout: Some(self.layout.name().to_string()),
             timezone: self.saved_zone.clone(),
             mouse: Some(self.mouse_on),
             list_width: self.list_width.map(i64::from),
             list_height: self.list_height.map(i64::from),
             wiki_width: self.wiki_width.map(i64::from),
+            files_width: self.files_width.map(i64::from),
             gantt_label: self.gantt_label.map(i64::from),
         }
     }
@@ -6738,6 +6894,91 @@ impl App {
         self.layout == view::Layout::Gantt
     }
 
+    /// Whether a diff pane stands on screen — `SPC o s` stands only then (`keys::Ctx::diff`): the file window's right
+    /// pane with its diff on (moai-ffk9.211), or the list's diff pane (moai-ffk9.cij) when it stands.
+    fn diff_shown(&self) -> bool {
+        match &self.mode {
+            Mode::Files(w) => w.diff_on,
+            _ => self.list_diff(),
+        }
+    }
+
+    /// The list's diff pane stands — on, not folded, and not under a covering window (statistics, wiki, files),
+    /// which draw over the list and its side panes.
+    fn list_diff(&self) -> bool {
+        self.diff_open && !self.diff_folded && !matches!(self.mode, Mode::Stats(_) | Mode::Wiki(_) | Mode::Files(_))
+    }
+
+    /// The panes the focus can stand on — the ring `Ctrl-w w` goes round, the neighbours `Ctrl-w h`·`l` find. The
+    /// detail stands while it is open (a squeezed one gives the focus back when drawn, `draw::screen`), the diff while
+    /// [`App::list_diff`].
+    fn standing(&self) -> Vec<Pane> {
+        let mut out = vec![Pane::Explorer];
+        if self.detail_open {
+            out.push(Pane::Detail);
+        }
+        if self.list_diff() {
+            out.push(Pane::Diff);
+        }
+        out
+    }
+
+    /// The diff's share (%) of the side pane on the axis it splits on now — the detail's place picks it.
+    pub(super) fn diff_share(&self) -> Option<u16> {
+        if self.detail_side().vertical() { self.diff_height } else { self.diff_width }
+    }
+
+    /// What the list's diff pane shows for the cursor's row: the row's issue as `moai diff <id>` reads it — an issue,
+    /// an epic or a milestone alike. `..`, a project's head, a basket and a row of a project gone have no subject; the
+    /// pane says there are no changes. The issues are shared, not copied, while the tracker was not read again.
+    fn diff_source(&mut self, rows: &[Row]) -> Option<diff::Source> {
+        let Some(Row::Item(seat, entry, _)) = self.current_of(rows) else { return None };
+        let at = entry.at()?;
+        let site = self.site_of_seat(seat)?;
+        let repo = site.repo.clone()?;
+        let id = site.issues.get(at)?.id.clone();
+        let root = repo.here().to_path_buf();
+        let fresh =
+            |c: &(std::path::PathBuf, Stamp, usize, _)| c.0 == root && c.1 == site.stamp && c.2 == site.issues.len();
+        let issues = match &self.diff_issues {
+            Some(c) if fresh(c) => c.3.clone(),
+            _ => {
+                let shared = std::sync::Arc::new(site.issues.clone());
+                let stamp = site.stamp;
+                let len = site.issues.len();
+                self.diff_issues = Some((root, stamp, len, shared.clone()));
+                shared
+            }
+        };
+        Some(diff::Source::Issue { repo, issues, id })
+    }
+
+    /// The list's diff pane follows the frame (`draw::screen` calls it once it has split the body): where it stands
+    /// it shows the cursor's row — `diff::View::show` does nothing for the same row, and one read runs at a time, the
+    /// newest waiting, so a cursor run down a hundred rows starts two reads. Where it does not stand (off, folded,
+    /// under a covering window) the read out is let go and none starts.
+    pub(super) fn aim_diff(&mut self, rows: &[Row], stands: bool) {
+        if !stands {
+            if self.diff.source().is_some() || !matches!(self.diff.shown, diff::Shown::Nothing) {
+                self.diff.close();
+            }
+            return;
+        }
+        self.diff.set_lang(self.site.lang);
+        let source = self.diff_source(rows);
+        if source.is_none() && self.diff.source().is_none() && matches!(self.diff.shown, diff::Shown::Nothing) {
+            return;
+        }
+        self.diff.show(source);
+    }
+
+    /// Whether the diff would fold if it stood beside the detail in the last frame's side pane — the notice `SPC v D`
+    /// gives when it turns on into too little room.
+    fn diff_would_fold(&self) -> bool {
+        let Some(side) = self.drawn.side else { return false };
+        draw::side_split(side, self.detail_side(), self.detail_open, true, self.diff_share().map(|d| 100 - d)).folded
+    }
+
     /// 상세 칸이 지금 서는 자리 — 간트면 간트의 자리(`gantt_detail_at`), 아니면 사람이 고른 자리다(moai-i4hf.sas).
     /// **그리기·마우스·칸 옮기기·키 바가 이 하나를 읽는다** — 한쪽만 간트의 자리를 보면 아래에 선 상세를 `Ctrl-w l` 이
     /// 오른쪽에서 찾는다.
@@ -7023,15 +7264,20 @@ impl App {
     /// 커서와 링크 자취가 그대로 남고 알림만 선다. 그 창의 페이지는 낡지 않았다: 사람이 다시 읽으라 한 것은 다른 창이다.
     /// 열리면 새 창이 그 자리를 덮는 것은 같다.
     pub(super) fn go(&mut self, to: keys::Screen, rows: &[Row]) {
-        let same =
-            matches!((&self.mode, to), (Mode::Stats(_), keys::Screen::Stats) | (Mode::Wiki(_), keys::Screen::Wiki));
-        let covering = matches!(to, keys::Screen::Stats | keys::Screen::Wiki);
-        if matches!(self.mode, Mode::Stats(_) | Mode::Wiki(_)) && (same || !covering) {
+        let same = matches!(
+            (&self.mode, to),
+            (Mode::Stats(_), keys::Screen::Stats)
+                | (Mode::Wiki(_), keys::Screen::Wiki)
+                | (Mode::Files(_), keys::Screen::Files)
+        );
+        let covering = matches!(to, keys::Screen::Stats | keys::Screen::Wiki | keys::Screen::Files);
+        if matches!(self.mode, Mode::Stats(_) | Mode::Wiki(_) | Mode::Files(_)) && (same || !covering) {
             self.mode = Mode::Browse;
         }
         let layout = match to {
             keys::Screen::Stats => return self.open_stats(),
             keys::Screen::Wiki => return self.open_wiki(),
+            keys::Screen::Files => return self.open_files(),
             keys::Screen::List => view::Layout::List,
             keys::Screen::Board => view::Layout::Board,
             keys::Screen::Gantt => view::Layout::Gantt,
@@ -7511,6 +7757,8 @@ impl App {
         // 이동한 키도 그 닫는 몫으로 도로 세운다(moai-y8v2, 아래 `act.moves()`).
         let carried = self.notice.take();
         let in_menu = menu::open(&self.chord);
+        // A key on the screen: the diff pane's refresh goes back to its shortest rest (moai-ffk9.15v).
+        self.diff.wake();
         // **키가 오면 끌기는 끝났다**(리뷰, moai-irrj) — 뗌을 놓치는 터미널이 있어(창 밖에서 떼면 안 알린다), 그 뒤로 키만
         // 쓰다 끝내면 끈 몫이 화면에만 서고 다음 실행에서 사라진다. 끝내는 키(Ctrl-C)보다 먼저 적는다. 알림을 걷은 **뒤에**
         // 부른다 — 적다가 진 까닭(`App::save_look`)이 이 키에 걷히면 사람이 못 본다.
@@ -7549,6 +7797,13 @@ impl App {
             }
             return;
         }
+        // **파일 창도 같은 결이다**(moai-ffk9.rpf).
+        if matches!(self.mode, Mode::Files(_)) {
+            if !self.files_key(k) {
+                self.notice = carried;
+            }
+            return;
+        }
         // 글을 받는 동안에는 이동키가 글자다. 먼저 가로챈다. **`Tab` 도 여기서
         // 멈춘다** — 적다 말고 포커스가 튀면 적던 것을 잃는다.
         if !matches!(self.mode, Mode::Browse) {
@@ -7564,6 +7819,19 @@ impl App {
         // 버린다. SPC 는 메뉴를 열고, 열린 메뉴는 제 규칙(모르는 키 무시·Esc·Bksp·이동키는 닫고 이동)으로 받는다
         // ([`menu::feed`]) — 메뉴로 누른 동작도 바로 누른 키와 같은 아래 `match` 를 지난다.
         // 목록은 여기서 **한 번** 센다 — 커서의 사실(`Ctx::leaf`)과 이동의 끝(`step`)이 같은 줄을 읽는다.
+        // **The diff pane's keys first while it has the focus** (moai-ffk9.41b's rule, moai-ffk9.cij): `Tab`·`Shift-Tab`
+        // go from file to file, `h`·`l` from scope to scope, `H`·`L` scroll it sideways — before the gantt's own `H`·`L`
+        // ([`menu::feed`] looks the gantt's table up first), which keep moving the chart while the focus is elsewhere.
+        // The moves stay the list's (`gg` is a prefix there) and reach the pane through [`App::step`].
+        if self.focus == Pane::Diff
+            && self.chord.held().is_empty()
+            && self.list_diff()
+            && let Lookup::Run(act) = keys::lookup(self.keys.diff, &[k])
+            && !matches!(act, keys::Diff::Step(_))
+        {
+            self.diff.key(act);
+            return;
+        }
         let rows = self.rows();
         let ctx = self.key_ctx(&rows);
         let before = self.chord.held().len();
@@ -7642,13 +7910,14 @@ impl App {
                 );
             }
             B::Help => self.open_help(rows),
-            B::FocusPrev => self.focus = self.focus.prev(),
-            B::FocusNext => self.focus = self.focus.next(),
+            B::FocusPrev => self.focus = self.focus.prev(&self.standing()),
+            B::FocusNext => self.focus = self.focus.next(&self.standing()),
             // **끝에서는 제자리다** — 목록에서 `Ctrl-w h` 를 눌러도 상세로 돌지 않는다.
-            B::Focus(side) => self.focus = self.focus.step(side, self.detail_side()),
+            B::Focus(side) => self.focus = self.focus.step(side, self.detail_side(), &self.standing()),
             B::Step(m) => match &mut self.mode {
                 Mode::Stats(w) => w.scroll.go(m),
                 Mode::Wiki(w) => w.step(m),
+                Mode::Files(w) => w.step(m),
                 _ => self.step(m, rows),
             },
             // **드나드는 키도 포커스를 탄다**(`enabled`). 상세를 읽다가 누른 Enter·←가 목록을
@@ -7779,6 +8048,27 @@ impl App {
             // 이동키가 어디에도 안 닿아 화면이 굳은 것으로 보인다(moai-ymnu).
             // **읽음은 시킬 때만 선다**(사용자 결정) — 커서가 지나갔다고, 상세를 봤다고 서지 않는다.
             B::Read | B::ReadAll | B::ReadGroup => self.mark_read(act, rows),
+            // The file window's own (moai-ffk9.211, moai-p7nr.4gf) — `files_key` takes them there.
+            B::Changed | B::Checkout => {}
+            // **The list's diff pane** (moai-ffk9.cij) — the detail's twin: off gives the focus back to the list and
+            // lets the read out go. On into a side pane too small for both says so — the detail stays, the diff folds
+            // (the person's answer), and the setting is kept on for when there is room.
+            B::Diff => {
+                self.diff_open = !self.diff_open;
+                if self.diff_open {
+                    if self.diff_would_fold() {
+                        let detail = keys::said(self.keys.browse, B::Detail);
+                        self.notice = Some(fill(say(self.site.lang, "tui.files.diff_folded"), &[("detail", &detail)]));
+                    }
+                } else {
+                    if self.focus == Pane::Diff {
+                        self.focus = Pane::Explorer;
+                    }
+                    self.diff_folded = false;
+                    self.diff.close();
+                }
+                self.save_look();
+            }
             B::Detail => {
                 self.detail_open = !self.detail_open;
                 if !self.detail_open {
@@ -7792,6 +8082,12 @@ impl App {
             B::DetailAt if self.gantt() => self.gantt_detail_at = self.gantt_detail_at.next(),
             B::DetailAt => {
                 self.detail_at = self.detail_at.next();
+                self.save_look();
+            }
+            // **The setting flips; the panes follow at their next frame** (moai-ffk9.41b) — each keeps the file at
+            // its top in view (`diff::View::frame`). The menu stays open on it, the word changing.
+            B::DiffLayout => {
+                self.diff_layout = self.diff_layout.toggled();
                 self.save_look();
             }
             // **원하는 값만 바꾼다** — 터미널에 잡기·놓기 글을 내는 것은 루프다(`cmd::tui`). 메뉴는
@@ -7842,6 +8138,7 @@ impl App {
         let statuses = self.screen_statuses();
         // 칸의 이름은 고른 배치로 댄다 — 한눈 보기에도 보드가 선다(moai-oagj.vcj).
         let layout = self.layout;
+        let standing = self.standing();
         keys::Ctx {
             proposals: !self.proposals.rows().is_empty(),
             lang: self.site.lang,
@@ -7883,18 +8180,26 @@ impl App {
             gantt: self.gantt(),
             stats: matches!(self.mode, Mode::Stats(_)),
             wiki: matches!(self.mode, Mode::Wiki(_)),
+            files: matches!(self.mode, Mode::Files(_)),
+            diff: self.diff_shown(),
+            diff_open: self.diff_open,
+            list_diff: self.list_diff(),
+            diff_split: self.diff_layout == diff::Layout::Split,
+            files_detail: matches!(&self.mode, Mode::Files(w) if w.detail_on),
+            files_diff: matches!(&self.mode, Mode::Files(w) if w.diff_on),
+            files_changed: matches!(&self.mode, Mode::Files(w) if w.changed_only()),
             head: self.head_at(rows).is_some(),
             board_foldable: self.board_fold_at(rows).is_some(),
             mouse: self.mouse_on,
             sorting: self.item_order(),
             fields: self.fields,
             detail: self.detail_open,
-            next_pane: self.focus.next().word(self.site.lang, layout),
-            prev_pane: self.focus.prev().word(self.site.lang, layout),
-            left_pane: self.focus.step(keys::Side::Left, self.detail_side()).word(self.site.lang, layout),
-            right_pane: self.focus.step(keys::Side::Right, self.detail_side()).word(self.site.lang, layout),
-            up_pane: self.focus.step(keys::Side::Up, self.detail_side()).word(self.site.lang, layout),
-            down_pane: self.focus.step(keys::Side::Down, self.detail_side()).word(self.site.lang, layout),
+            next_pane: self.focus.next(&standing).word(self.site.lang, layout),
+            prev_pane: self.focus.prev(&standing).word(self.site.lang, layout),
+            left_pane: self.focus.step(keys::Side::Left, self.detail_side(), &standing).word(self.site.lang, layout),
+            right_pane: self.focus.step(keys::Side::Right, self.detail_side(), &standing).word(self.site.lang, layout),
+            up_pane: self.focus.step(keys::Side::Up, self.detail_side(), &standing).word(self.site.lang, layout),
+            down_pane: self.focus.step(keys::Side::Down, self.detail_side(), &standing).word(self.site.lang, layout),
             keys: self.keys,
         }
     }
@@ -7925,6 +8230,7 @@ impl App {
                 self.move_to(at);
             }
             Pane::Detail => self.detail.go(m),
+            Pane::Diff => self.diff.key(keys::Diff::Step(m)),
         }
     }
 
@@ -8049,7 +8355,8 @@ impl App {
             | Mode::ArchiveDays(_)
             | Mode::Sort(_)
             | Mode::Stats(_)
-            | Mode::Wiki(_) => {
+            | Mode::Wiki(_)
+            | Mode::Files(_) => {
                 return;
             }
         };
@@ -8320,6 +8627,8 @@ impl App {
             Mode::Stats(_) => {}
             // 찾는 칸이 열렸으면 거기 넣는다 — 목록이 그만큼 좁아진다.
             Mode::Wiki(w) => w.paste(s),
+            // Into the search field when it is open (moai-ffk9.rid), else nowhere.
+            Mode::Files(w) => w.paste(s),
         }
     }
 
@@ -11074,10 +11383,10 @@ mod tests {
         assert_eq!(a.focus, Pane::Explorer, "Tab 이 아직 칸을 옮긴다");
         // 순환은 칸이 몇이든 제자리로 돌아온다
         for p in Pane::ALL {
-            assert_eq!(p.next().prev(), p);
+            assert_eq!(p.next(&Pane::ALL).prev(&Pane::ALL), p);
             let mut q = p;
             for _ in Pane::ALL {
-                q = q.next();
+                q = q.next(&Pane::ALL);
             }
             assert_eq!(q, p);
         }
@@ -15297,15 +15606,17 @@ mod tests {
         assert!(!super::menu::open(&a.chord), "Esc 가 메뉴를 안 닫았다");
         assert!(a.detail_open, "자리를 돌리는 것이 상세를 껐다");
 
+        // The list and the detail — the diff pane (moai-ffk9.cij) is off here.
+        const TWO: [Pane; 2] = [Pane::Explorer, Pane::Detail];
         // **칸 옮기기가 그림을 따라간다**(moai-2g7d) — 상세가 왼쪽이면 `Ctrl-w h` 가 상세로 간다.
         // 칸의 차례를 코드에 박아 두면 자리를 돌린 순간 손에 익은 키가 화면과 거꾸로 선다.
         for (at, left, right) in
             [(DetailAt::Right, Pane::Explorer, Pane::Detail), (DetailAt::Left, Pane::Detail, Pane::Explorer)]
         {
             a.detail_at = at;
-            for from in Pane::ALL {
-                assert_eq!(from.step(keys::Side::Left, at), left, "{at:?} 에서 Ctrl-w h 가 엉뚱한 칸으로 갔다");
-                assert_eq!(from.step(keys::Side::Right, at), right, "{at:?} 에서 Ctrl-w l 이 엉뚱한 칸으로 갔다");
+            for from in TWO {
+                assert_eq!(from.step(keys::Side::Left, at, &TWO), left, "{at:?} 에서 Ctrl-w h 가 엉뚱한 칸으로 갔다");
+                assert_eq!(from.step(keys::Side::Right, at, &TWO), right, "{at:?} 에서 Ctrl-w l 이 엉뚱한 칸으로 갔다");
             }
         }
         // **위아래로 가른 자리에는 `Ctrl-w j`·`k` 가 간다**(moai-x7pa) — 좌우로 갈랐을 때의
@@ -15313,9 +15624,9 @@ mod tests {
         for (at, first, last) in
             [(DetailAt::Bottom, Pane::Explorer, Pane::Detail), (DetailAt::Top, Pane::Detail, Pane::Explorer)]
         {
-            for from in Pane::ALL {
-                assert_eq!(from.step(keys::Side::Up, at), first, "{at:?} 에서 Ctrl-w k 가 엉뚱한 칸으로 갔다");
-                assert_eq!(from.step(keys::Side::Down, at), last, "{at:?} 에서 Ctrl-w j 가 엉뚱한 칸으로 갔다");
+            for from in TWO {
+                assert_eq!(from.step(keys::Side::Up, at, &TWO), first, "{at:?} 에서 Ctrl-w k 가 엉뚱한 칸으로 갔다");
+                assert_eq!(from.step(keys::Side::Down, at, &TWO), last, "{at:?} 에서 Ctrl-w j 가 엉뚱한 칸으로 갔다");
             }
         }
         // **이웃은 가른 축에만 있다** — vim 그대로 제자리고, 어느 자리에서든 도는 것은 `Ctrl-w w` 다.
@@ -15330,8 +15641,8 @@ mod tests {
             let c = keys::Ctx { detail: true, detail_at: at, ..a.key_ctx(&[]) };
             for side in away {
                 for from in Pane::ALL {
-                    assert_eq!(from.step(side, at), from, "{at:?} 에서 Ctrl-w {side:?} 가 움직였다");
-                    assert_ne!(from.next(), from, "Ctrl-w w 마저 제자리다");
+                    assert_eq!(from.step(side, at, &TWO), from, "{at:?} 에서 Ctrl-w {side:?} 가 움직였다");
+                    assert_ne!(from.next(&TWO), from, "Ctrl-w w 마저 제자리다");
                 }
                 assert!(keys::Browse::Focus(side).enabled(&c).is_err(), "{at:?} 에서 Ctrl-w {side:?} 가 섰다");
             }
@@ -17282,5 +17593,492 @@ mod tests {
         a.load_look();
         assert!(a.notice.clone().unwrap_or_default().contains("nope"), "{:?}", a.notice);
         assert!(a.sort.projects.is_empty(), "{:?}", a.sort.projects);
+    }
+
+    // ---- the list's diff pane, SPC v D (moai-ffk9.cij) ----
+    mod diff_pane {
+        use super::*;
+        use crate::report::changes::{Offer, Scope};
+        use crate::tui::view::DetailAt;
+        use ratatui::crossterm::event::{MouseButton, MouseEvent, MouseEventKind};
+        use std::sync::Arc;
+        use std::sync::atomic::{AtomicBool, AtomicUsize, Ordering};
+        use std::time::{Duration, Instant};
+
+        const EN: crate::i18n::Lang = crate::i18n::Lang::En;
+
+        /// A project on disk — an epic, two members and a plain issue — opened as the explorer opens it, so its rows
+        /// have a repository (the pane reads nothing without one).
+        fn opened(name: &str) -> (Scratch, App) {
+            let s = scratch(name);
+            let rows = [
+                make("argos-0001", Kind::Epic),
+                member("argos-0002", "argos-0001"),
+                member("argos-0003", "argos-0001"),
+                make("argos-0009", Kind::Issue),
+            ];
+            let text: String = rows.iter().map(|i| serde_json::to_string(i).unwrap() + "\n").collect();
+            std::fs::write(s.join(".moai/issues.jsonl"), text).unwrap();
+            let repo = Repo::at(s.path().to_path_buf(), cfg());
+            let stamp = stamp_of(&repo);
+            let load = repo.read().unwrap();
+            let (index, ground) = measure(&load.issues, &repo.config);
+            let mut a = App::open(repo, load, index, ground, Path::new(), stamp);
+            a.site.lang = EN;
+            (s, a)
+        }
+
+        /// A reader standing in for git: it counts its calls, waits while `hold` is up, and answers one file named
+        /// after the row with one long line. The members' branch is their epic's; `argos-0009` has no scope at all.
+        fn reader(hold: Arc<AtomicBool>, calls: Arc<AtomicUsize>) -> Arc<diff::ReadFn> {
+            Arc::new(move |src: &diff::Source, scope, _, lang| {
+                calls.fetch_add(1, Ordering::SeqCst);
+                while hold.load(Ordering::SeqCst) {
+                    std::thread::sleep(Duration::from_millis(1));
+                }
+                let diff::Source::Issue { id, .. } = src else { panic!("the list read a checkout") };
+                if id == "argos-0009" {
+                    return diff::Loaded::default();
+                }
+                let owner = (id != "argos-0001").then(|| "argos-0001".to_string());
+                let offer =
+                    |scope| Offer { scope, checkout: None, branch: Some("worktree-moai".into()), owner: owner.clone() };
+                let long: String = (0..40).map(|i| format!("w{i:02} ")).collect();
+                let patch =
+                    format!("diff --git a/{id}.rs b/{id}.rs\n--- a/{id}.rs\n+++ b/{id}.rs\n@@ -1 +1 @@\n-a\n+{long}\n");
+                let at = scope.or(Some(Scope::Branch));
+                diff::sample(&patch, at, vec![offer(Scope::Branch), offer(Scope::Working)], lang)
+            })
+        }
+
+        fn with_reader(a: &mut App) -> (Arc<AtomicBool>, Arc<AtomicUsize>) {
+            let (hold, calls) = (Arc::new(AtomicBool::new(false)), Arc::new(AtomicUsize::new(0)));
+            a.diff = diff::View::with(reader(hold.clone(), calls.clone()), Arc::new(|_| None), EN);
+            (hold, calls)
+        }
+
+        /// Draw, then take the answers until the pane has nothing out.
+        fn settle(a: &mut App) {
+            let began = Instant::now();
+            loop {
+                draw::tests::render(a, 140, 60);
+                a.follow();
+                if !a.diff.busy() {
+                    draw::tests::render(a, 140, 60);
+                    return;
+                }
+                assert!(began.elapsed() < Duration::from_secs(30), "the pane kept waiting");
+                std::thread::sleep(Duration::from_millis(1));
+            }
+        }
+
+        fn shown_file(a: &App) -> Option<String> {
+            a.diff.loaded().and_then(|l| l.parts.first()).map(|p| p.change.path.clone())
+        }
+
+        fn go_to(a: &mut App, id: &str) {
+            let at = a.rows().iter().position(|r| match r {
+                Row::Item(seat, e, _) => e.at().and_then(|i| a.issue_at(*seat, i)).is_some_and(|i| i.id == id),
+                _ => false,
+            });
+            a.move_to(at.unwrap_or_else(|| panic!("{id} is not a row: {:?}", row_ids(a))));
+        }
+
+        fn mouse(a: &mut App, kind: MouseEventKind, column: u16, row: u16) {
+            a.mouse(MouseEvent { kind, column, row, modifiers: KeyModifiers::NONE });
+        }
+
+        /// **The list's pane reads itself again** (moai-ffk9.15v): an issue's branch never on the pace — only once the
+        /// commit table comes again (a `HEAD` moved) — and its working tree at the pace.
+        #[test]
+        fn the_lists_pane_reads_again_when_the_head_moved_and_its_working_tree_at_the_pace() {
+            let (_s, mut a) = opened("diff-refresh");
+            let calls = Arc::new(AtomicUsize::new(0));
+            let t = Arc::new(std::sync::Mutex::new(Instant::now()));
+            let c = t.clone();
+            a.diff = diff::View::with(reader(Arc::new(AtomicBool::new(false)), calls.clone()), Arc::new(|_| None), EN)
+                .clocked(Arc::new(move || *c.lock().unwrap()));
+            a.hit("SPC v D");
+            go_to(&mut a, "argos-0001");
+            settle(&mut a);
+            let began = Instant::now();
+            while a.gathering_commits() || !a.diff.idle() {
+                a.follow();
+                assert!(began.elapsed() < Duration::from_secs(30), "the commit table never came");
+                std::thread::sleep(Duration::from_millis(2));
+            }
+            assert_eq!(a.diff.offers().1, Some(Scope::Branch));
+            let wait_for = |a: &mut App, n: usize| {
+                let began = Instant::now();
+                while calls.load(Ordering::SeqCst) < n {
+                    a.follow();
+                    assert!(began.elapsed() < Duration::from_secs(30), "the pane was not read again");
+                    std::thread::sleep(Duration::from_millis(2));
+                }
+            };
+            let n = calls.load(Ordering::SeqCst);
+            for _ in 0..5 {
+                *t.lock().unwrap() += Duration::from_secs(30);
+                a.follow();
+                std::thread::sleep(Duration::from_millis(5));
+                a.follow();
+            }
+            assert_eq!(calls.load(Ordering::SeqCst), n, "the branch scope ran git on the pace");
+            // The commit table comes again: the branch is read again.
+            let (tx, rx) = std::sync::mpsc::channel();
+            tx.send(Default::default()).unwrap();
+            a.commits_job = Some((rx, std::thread::spawn(|| {})));
+            wait_for(&mut a, n + 1);
+            // The working tree: at the pace.
+            a.diff.key(keys::Diff::NextScope);
+            settle(&mut a);
+            let m = calls.load(Ordering::SeqCst);
+            *t.lock().unwrap() += Duration::from_secs(2);
+            wait_for(&mut a, m + 1);
+        }
+
+        /// **The side pane parts by the detail's place** — the detail first (left or above), the diff after it on the
+        /// detail's axis, the list where it was; the detail hidden, the diff takes the detail's place whole; both off,
+        /// the list takes the body. The gantt follows its own place (`gantt_detail_at`), not the list's.
+        #[test]
+        fn the_side_pane_parts_by_the_detail_place() {
+            let mut a = App::new(vec![make("argos-0001", Kind::Issue)], cfg(), Path::new());
+            for at in [DetailAt::Right, DetailAt::Bottom, DetailAt::Left, DetailAt::Top] {
+                a.detail_at = at;
+                a.diff_open = false;
+                draw::tests::render(&mut a, 140, 60);
+                let (alone, list_alone) = (a.drawn.detail.expect("the detail did not stand"), a.drawn.list);
+                a.diff_open = true;
+                draw::tests::render(&mut a, 140, 60);
+                let d = a.drawn.clone();
+                let (detail, diff, list) = (d.detail.expect("no detail"), d.diff.expect("no diff"), d.list);
+                assert_eq!((d.side, list), (Some(alone), list_alone), "{at:?}: the diff moved the list's line");
+                assert_eq!(detail.union(diff), alone, "{at:?}: the two do not fill the side pane");
+                if at.vertical() {
+                    assert_eq!((detail.bottom(), detail.x, detail.width), (diff.y, diff.x, diff.width), "{at:?}");
+                } else {
+                    assert_eq!((detail.right(), detail.y, detail.height), (diff.x, diff.y, diff.height), "{at:?}");
+                }
+                a.detail_open = false;
+                draw::tests::render(&mut a, 140, 60);
+                assert_eq!((a.drawn.detail, a.drawn.diff, a.drawn.list), (None, Some(alone), list_alone), "{at:?}");
+                a.diff_open = false;
+                draw::tests::render(&mut a, 140, 60);
+                assert_eq!((a.drawn.list, a.drawn.diff, a.drawn.side), (a.drawn.body, None, None), "{at:?}");
+                a.detail_open = true;
+            }
+            a.detail_at = DetailAt::Right;
+            a.diff_open = true;
+            a.hit("SPC g g Esc");
+            assert!(a.gantt() && a.gantt_detail_at == DetailAt::Bottom, "the gantt's place is not below");
+            draw::tests::render(&mut a, 140, 60);
+            let (detail, diff) = (a.drawn.detail.unwrap(), a.drawn.diff.expect("no diff on the gantt"));
+            assert_eq!(detail.bottom(), diff.y, "the gantt's diff followed the list's place, not the gantt's");
+        }
+
+        /// **`SPC v D` turns the diff and only it; `SPC v d` the detail and only it** — the menu says each one's state.
+        #[test]
+        fn spc_v_shift_d_and_spc_v_d_each_touch_their_own() {
+            let mut a = App::new(vec![make("argos-0001", Kind::Issue)], cfg(), Path::new());
+            a.site.lang = EN;
+            a.hit("SPC v D Esc");
+            assert!(a.diff_open && a.detail_open, "SPC v D touched the detail or missed the diff");
+            a.hit("SPC v d Esc");
+            assert!(a.diff_open && !a.detail_open, "SPC v d touched the diff");
+            let c = a.key_ctx(&a.rows());
+            assert_eq!(keys::Browse::Diff.state(&c).as_deref(), Some("[shown]"));
+            a.hit("SPC v D Esc");
+            assert!(!a.diff_open && !a.detail_open);
+            let c = a.key_ctx(&a.rows());
+            assert_eq!(keys::Browse::Diff.state(&c).as_deref(), Some("[hidden]"));
+        }
+
+        /// **`Ctrl-w w` goes round list → detail → diff; `Ctrl-w h`·`l` follow the picture.** With the detail hidden
+        /// and the diff on there are still two panes, so the moves stand.
+        #[test]
+        fn the_focus_goes_round_the_panes_that_stand() {
+            let mut a = App::new(vec![make("argos-0001", Kind::Issue)], cfg(), Path::new());
+            a.diff_open = true;
+            draw::tests::render(&mut a, 140, 60);
+            let mut seen = Vec::new();
+            for _ in 0..3 {
+                a.hit("Ctrl-w w");
+                seen.push(a.focus);
+            }
+            assert_eq!(seen, [Pane::Detail, Pane::Diff, Pane::Explorer], "Ctrl-w w skipped the diff");
+            a.hit("Ctrl-w l");
+            a.hit("Ctrl-w l");
+            assert_eq!(a.focus, Pane::Diff, "Ctrl-w l did not reach the diff right of the detail");
+            a.hit("Ctrl-w h");
+            assert_eq!(a.focus, Pane::Detail);
+            a.detail_at = DetailAt::Left;
+            a.focus = Pane::Explorer;
+            a.hit("Ctrl-w h");
+            assert_eq!(a.focus, Pane::Diff, "the diff stands next to the list when the detail is left");
+            a.detail_at = DetailAt::Right;
+            a.hit("SPC v d Esc");
+            draw::tests::render(&mut a, 140, 60);
+            a.focus = Pane::Explorer;
+            a.hit("Ctrl-w w");
+            assert_eq!(a.focus, Pane::Diff, "with the detail hidden the moves went off");
+            a.hit("Ctrl-w w");
+            assert_eq!(a.focus, Pane::Explorer);
+            a.focus = Pane::Diff;
+            a.hit("SPC v D Esc");
+            assert_eq!(a.focus, Pane::Explorer, "the focus stayed on the pane turned off");
+        }
+
+        /// **Too small for both, the detail stays and the diff folds** — the focus leaves the folded pane, the setting
+        /// stays on and nothing is written; hiding the detail stands the diff in its place. Turning it on there says
+        /// why it does not show.
+        #[test]
+        fn too_small_for_both_the_detail_stays_and_the_diff_folds() {
+            let s = scratch("diff-fold");
+            let user = s.join("user.toml");
+            let mut a = App::new(vec![make("argos-0001", Kind::Issue)], cfg(), Path::new());
+            a.site.lang = EN;
+            a.user_config = Some(user.clone());
+            draw::tests::render(&mut a, 40, 30);
+            a.hit("SPC v D Esc");
+            assert!(a.notice.as_deref().is_some_and(|n| n.contains("folded")), "no word on the fold: {:?}", a.notice);
+            std::fs::remove_file(&user).unwrap();
+            a.focus = Pane::Diff;
+            draw::tests::render(&mut a, 40, 30);
+            assert!(a.drawn.detail.is_some() && a.drawn.diff.is_none(), "the diff stood, or the detail folded");
+            assert_eq!(a.focus, Pane::Explorer, "the focus stayed on the folded diff");
+            assert!(a.diff_open && a.diff_folded, "the fold turned the setting off");
+            assert!(!a.key_ctx(&a.rows()).diff, "SPC o s stands for a folded diff");
+            a.hit("Ctrl-w w");
+            a.hit("Ctrl-w w");
+            assert_eq!(a.focus, Pane::Explorer, "Ctrl-w w went to the folded diff");
+            assert!(!user.exists(), "the fold wrote the config");
+            a.hit("SPC v d Esc");
+            draw::tests::render(&mut a, 40, 30);
+            assert!(a.drawn.detail.is_none() && a.drawn.diff.is_some(), "the hidden detail did not give its place");
+        }
+
+        /// **The line between the detail and the diff moves the diff's share, never the list's** — side by side
+        /// `diff_width`, stacked `diff_height`, within 15–85, written once on release and not before.
+        #[test]
+        fn the_side_line_moves_the_diff_share_and_not_the_list() {
+            let s = scratch("diff-line");
+            let user = s.join("user.toml");
+            let mut a = App::new(vec![make("argos-0001", Kind::Issue)], cfg(), Path::new());
+            a.user_config = Some(user.clone());
+            a.diff_open = true;
+            draw::tests::render(&mut a, 140, 60);
+            let (detail, y) = (a.drawn.detail.unwrap(), a.drawn.body.y + 3);
+            let line = detail.right() - 1;
+            mouse(&mut a, MouseEventKind::Down(MouseButton::Left), line, y);
+            assert!(a.dragging.is_some(), "the side line was not taken");
+            mouse(&mut a, MouseEventKind::Drag(MouseButton::Left), line - 8, y);
+            draw::tests::render(&mut a, 140, 60);
+            assert_eq!(a.drawn.detail.unwrap().right() - 1, line - 8, "the line did not follow the hand");
+            assert!(!user.exists(), "the drag wrote while it went");
+            mouse(&mut a, MouseEventKind::Drag(MouseButton::Left), 0, y);
+            assert!(a.diff_width.is_some_and(|w| (15..=85).contains(&w)), "{:?}", a.diff_width);
+            mouse(&mut a, MouseEventKind::Drag(MouseButton::Left), 300, y);
+            assert!(a.diff_width.is_some_and(|w| (15..=85).contains(&w)), "{:?}", a.diff_width);
+            mouse(&mut a, MouseEventKind::Drag(MouseButton::Left), line - 8, y);
+            mouse(&mut a, MouseEventKind::Up(MouseButton::Left), line - 8, y);
+            assert_eq!((a.list_width, a.list_height, a.diff_height), (None, None, None), "another share moved");
+            let text = std::fs::read_to_string(&user).expect("the release wrote nothing");
+            let width = a.diff_width.unwrap();
+            assert!(text.contains(&format!("diff_width = {width}")), "{text}");
+            assert!(!text.contains("list_") && !text.contains("diff_height"), "{text}");
+
+            // Stacked, the height's share moves and the width's stays.
+            a.detail_at = DetailAt::Bottom;
+            draw::tests::render(&mut a, 140, 60);
+            let detail = a.drawn.detail.unwrap();
+            let line = detail.bottom() - 1;
+            mouse(&mut a, MouseEventKind::Down(MouseButton::Left), detail.x + 5, line);
+            mouse(&mut a, MouseEventKind::Drag(MouseButton::Left), detail.x + 5, line + 2);
+            mouse(&mut a, MouseEventKind::Up(MouseButton::Left), detail.x + 5, line + 2);
+            assert!(a.diff_height.is_some() && a.diff_width == Some(width), "{:?} {:?}", a.diff_height, a.diff_width);
+            assert_eq!((a.list_width, a.list_height), (None, None), "the side line moved the list's share");
+
+            // The list's own line still moves the list's share, beside the side line.
+            a.detail_at = DetailAt::Right;
+            draw::tests::render(&mut a, 140, 60);
+            let at = a.drawn.list.right() - 1;
+            mouse(&mut a, MouseEventKind::Down(MouseButton::Left), at, y);
+            mouse(&mut a, MouseEventKind::Drag(MouseButton::Left), at - 5, y);
+            mouse(&mut a, MouseEventKind::Up(MouseButton::Left), at - 5, y);
+            assert!(a.list_width.is_some() && a.diff_width == Some(width), "the list's line moved the diff's share");
+        }
+
+        /// **The pane shows the cursor's row** — moving on shows the next row's diff, a member's branch scope says
+        /// whose it is, a row without scopes says there are no changes. The diff follows the wheel and the keys only
+        /// with the focus.
+        #[test]
+        fn the_pane_shows_the_cursor_row() {
+            let (_s, mut a) = opened("diff-row");
+            with_reader(&mut a);
+            a.hit("SPC v D Esc");
+            go_to(&mut a, "argos-0001");
+            settle(&mut a);
+            assert_eq!(shown_file(&a).as_deref(), Some("argos-0001.rs"));
+            a.hit("l");
+            go_to(&mut a, "argos-0002");
+            settle(&mut a);
+            assert_eq!(shown_file(&a).as_deref(), Some("argos-0002.rs"), "the row before's diff stood");
+            a.list_width = Some(20);
+            let screen = draw::tests::render(&mut a, 260, 60).join("\n");
+            assert!(screen.contains("of argos-0001"), "the member's branch does not say it is the epic's:\n{screen}");
+            go_to(&mut a, "argos-0009");
+            settle(&mut a);
+            let screen = draw::tests::render(&mut a, 260, 60).join("\n");
+            assert!(screen.contains("no changes"), "a row without scopes stood blank:\n{screen}");
+            // `h`·`l` go from scope to scope with the focus there, and stay the list's elsewhere.
+            go_to(&mut a, "argos-0002");
+            settle(&mut a);
+            a.focus = Pane::Diff;
+            a.hit("l");
+            settle(&mut a);
+            assert_eq!(a.diff.offers().1, Some(Scope::Working), "l did not take the next scope");
+            assert_eq!(a.ctl_state(false)["focus"], "diff");
+        }
+
+        /// **The bar names the diff's own keys while the pane has the focus** (moai-ffk9.9m0) — files, scopes, sideways
+        /// and the layout, and at 80 columns the pane's own three and the way out still stand.
+        #[test]
+        fn the_bar_names_the_diff_keys_while_the_pane_has_the_focus() {
+            let (_s, mut a) = opened("diff-bar");
+            with_reader(&mut a);
+            a.hit("SPC v D Esc");
+            go_to(&mut a, "argos-0001");
+            settle(&mut a);
+            let bar = |a: &mut App, w| draw::tests::render(a, w, 60).last().cloned().unwrap_or_default();
+            let ours = ["Tab·Shift-Tab files", "h·l scopes", "H·L sideways", "SPC o s diff layout"];
+            let list = bar(&mut a, 160);
+            assert!(ours.iter().all(|k| !list.contains(k)), "the list's focus named the diff's keys: {list:?}");
+            a.focus = Pane::Diff;
+            let wide = bar(&mut a, 160);
+            for k in ours {
+                assert!(wide.contains(k), "{k:?} is not on the bar: {wide:?}");
+            }
+            let narrow = bar(&mut a, 80);
+            assert_eq!(a.focus, Pane::Diff, "the premise — the pane stands at 80 columns");
+            for k in [&ours[..3], &["Ctrl-w w", "SPC menu"]].concat() {
+                assert!(narrow.contains(k), "{k:?} is not on the 80-column bar: {narrow:?}");
+            }
+        }
+
+        /// **On the gantt `L` belongs to the pane that has the focus** — the diff scrolls sideways with it, the chart
+        /// moves without it.
+        #[test]
+        fn on_the_gantt_shift_l_goes_where_the_focus_is() {
+            let (_s, mut a) = opened("diff-gantt");
+            with_reader(&mut a);
+            a.hit("SPC g g Esc");
+            a.hit("SPC v D Esc");
+            go_to(&mut a, "argos-0009");
+            go_to(&mut a, "argos-0001");
+            settle(&mut a);
+            let chart = a.chart;
+            a.focus = Pane::Diff;
+            a.hit("L");
+            assert!(a.diff.pan > 0, "L did not scroll the diff");
+            assert_eq!(a.chart, chart, "L moved the gantt while the diff had the focus");
+            let pan = a.diff.pan;
+            a.focus = Pane::Explorer;
+            a.hit("L");
+            assert_eq!(a.diff.pan, pan, "L scrolled the diff without the focus");
+            assert_ne!(a.chart, chart, "L did not move the gantt");
+        }
+
+        /// **Running the cursor down a hundred rows does not run git a hundred times, and no key waits for it**; with the
+        /// pane off nothing is read at all.
+        #[test]
+        fn the_cursor_never_waits_and_git_does_not_follow_every_row() {
+            let (_s, mut a) = opened("diff-slow");
+            let (hold, calls) = with_reader(&mut a);
+            hold.store(true, Ordering::SeqCst);
+            for _ in 0..20 {
+                draw::tests::render(&mut a, 140, 60);
+                a.hit("j");
+            }
+            assert_eq!(calls.load(Ordering::SeqCst), 0, "a pane turned off read");
+            a.hit("SPC v D Esc");
+            for i in 0..100 {
+                let began = Instant::now();
+                a.hit(if i % 2 == 0 { "j" } else { "k" });
+                draw::tests::render(&mut a, 140, 60);
+                a.follow();
+                assert!(began.elapsed() < Duration::from_secs(1), "a key waited on the read");
+            }
+            assert!(calls.load(Ordering::SeqCst) <= 2, "{} reads for a hundred rows", calls.load(Ordering::SeqCst));
+            hold.store(false, Ordering::SeqCst);
+            settle(&mut a);
+            assert!(calls.load(Ordering::SeqCst) <= 3, "{} reads", calls.load(Ordering::SeqCst));
+        }
+
+        /// **The pane and its shares are the person's, kept in `[tui]`** — a new explorer stands them again; a config
+        /// without the keys stands the pane off at half, as before.
+        #[test]
+        fn the_pane_and_its_shares_are_kept() {
+            let s = scratch("diff-keep");
+            let user = s.join("user.toml");
+            let mut a = App::new(vec![make("argos-0001", Kind::Issue)], cfg(), Path::new());
+            a.user_config = Some(user.clone());
+            a.load_look();
+            assert!(!a.diff_open && a.diff_width.is_none() && a.diff_height.is_none());
+            a.hit("SPC v D Esc");
+            let text = std::fs::read_to_string(&user).unwrap();
+            assert!(text.contains("diff = true") && !text.contains("diff_width"), "{text}");
+            std::fs::write(&user, format!("{text}diff_width = 30\ndiff_height = 99\n")).unwrap();
+            let mut b = App::new(vec![make("argos-0001", Kind::Issue)], cfg(), Path::new());
+            b.user_config = Some(user);
+            b.load_look();
+            assert_eq!((b.diff_open, b.diff_width, b.diff_height), (true, Some(30), Some(85)));
+        }
+
+        /// **`moai ctl view diff on|off` turns the pane; `ctl state` says it**, and an unknown name is refused as before.
+        #[test]
+        fn ctl_view_diff_turns_the_pane_and_state_says_it() {
+            use crate::ctl::wire::Verb;
+            let (_s, mut a) = opened("diff-ctl");
+            with_reader(&mut a);
+            let on = a.ctl(&ctl_req(Verb::View { name: "diff".into(), on: true }, None));
+            assert!(on.ok && a.diff_open, "{on:?}");
+            settle(&mut a);
+            let state = a.ctl_state(false);
+            assert_eq!(state["diff"]["shown"], true, "{state}");
+            assert_eq!(state["diff"]["scope"], "branch", "{state}");
+            assert_eq!(state["diff"]["offers"], serde_json::json!(["branch", "working"]), "{state}");
+            assert!(state["panes"].get("diff_width").is_some(), "{state}");
+            let off = a.ctl(&ctl_req(Verb::View { name: "diff".into(), on: false }, None));
+            assert!(off.ok && !a.diff_open, "{off:?}");
+            let bad = a.ctl(&ctl_req(Verb::View { name: "nope".into(), on: true }, None));
+            assert_eq!(bad.code.as_deref(), Some("bad_input"), "{bad:?}");
+        }
+
+        /// **The pane answers what `moai diff <id>` answers** — the first scope shown and the scopes in their order, read
+        /// by the same `changes::offers` on a real repository.
+        #[test]
+        fn the_pane_answers_as_moai_diff_does() {
+            let (s, mut a) = opened("diff-same");
+            let root = s.path().to_path_buf();
+            let git = |args: &[&str]| crate::git::tests::run_git(&root, None, args);
+            git(&["init", "-q", "-b", "main"]);
+            std::fs::write(root.join("a.rs"), "fn a() {}\n").unwrap();
+            git(&["add", "-A"]);
+            git(&["commit", "-q", "-m", "feat: a (argos-0009)"]);
+            std::fs::write(root.join("a.rs"), "fn a() { 1 }\n").unwrap();
+            a.diff = diff::View::new(EN);
+            a.hit("SPC v D Esc");
+            go_to(&mut a, "argos-0009");
+            settle(&mut a);
+            let repo = a.site.repo.clone().unwrap();
+            let cli = crate::changes::offers(&repo, &a.site.issues, "argos-0009", None, EN)
+                .read(None, None, false, None)
+                .expect("moai diff refused");
+            let (offers, at) = a.diff.offers();
+            assert_eq!(at, cli.scope, "the first scope differs from moai diff's");
+            let order = |o: &[Offer]| o.iter().map(|o| o.scope).collect::<Vec<_>>();
+            assert_eq!(order(offers), order(&cli.offers), "the scopes' order differs from moai diff's");
+            assert!(!cli.offers.is_empty(), "the fixture gave moai diff nothing to show");
+        }
     }
 }

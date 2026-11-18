@@ -115,11 +115,14 @@ test('table: 제외 keys are absent (0, SPC q, SPC g s, SPC c w, SPC o m, SPC p 
   assert.equal(KEY_TABLE.menu.find((b) => b.keys.includes('SPC o t'))?.action, 'option.timezone')
 })
 
-test('table: no Ctrl-w anywhere (it closes the browser tab); SPC w and Alt-Backspace everywhere', () => {
+test('table: no Ctrl-w anywhere (it closes the browser tab); SPC x and Alt-Backspace everywhere', () => {
   const everything = Object.values(KEY_TABLE).flat().flatMap((b) => [...bindingKeys(b, 'mac'), ...bindingKeys(b, 'other')])
   assert.equal(everything.filter((key) => key.startsWith('C-w')).length, 0)
-  assert.ok(KEY_TABLE.menu.some((b) => b.action === 'focus.next' && b.keys.includes('SPC w w')))
-  for (const side of ['W', 'h', 'j', 'k', 'l']) assert.ok(KEY_TABLE.menu.some((b) => b.keys.includes(`SPC w ${side}`)), `SPC w ${side}`)
+  const moves = { x: 'focus.next', X: 'focus.prev', h: 'focus.left', j: 'focus.down', k: 'focus.up', l: 'focus.right' }
+  for (const [side, action] of Object.entries(moves)) assert.equal(KEY_TABLE.menu.find((b) => b.keys.includes(`SPC x ${side}`))?.action, action, `SPC x ${side}`)
+  // The pane moves left `SPC w` (moai-dy7a.tzl): no alias, `SPC w` is the files tab's checkout picker now.
+  assert.deepEqual(everything.filter((key) => key.startsWith('SPC w ')), [])
+  assert.deepEqual(KEY_TABLE.menu.filter((b) => b.keys.includes('SPC w')).map((b) => b.action), ['files.checkout'])
   const word = KEY_TABLE.prompt.find((b) => b.action === 'prompt.deleteWord')
   assert.deepEqual(bindingKeys(word, 'other'), ['A-Backspace'])
   assert.deepEqual(bindingKeys(word, 'mac'), ['A-Backspace'])
@@ -285,7 +288,7 @@ test('router: gg goes to the top; g then another key drops both (keys.rs Chord::
   assert.deepEqual(changes.at(-1), { pending: [], menu: null })
 })
 
-test('router: Ctrl-w is the browser\'s on every platform, SPC w moves the focus', () => {
+test('router: Ctrl-w is the browser\'s on every platform, SPC x moves the focus', () => {
   for (const platform of ['mac', 'other']) {
     const r = setup({ platform })
     assert.deepEqual(r.key('w', { ctrlKey: true }), { handled: false, preventDefault: false }, platform)
@@ -293,11 +296,35 @@ test('router: Ctrl-w is the browser\'s on every platform, SPC w moves the focus'
     assert.deepEqual(r.ids(), [])
   }
   for (const r of [setup({ platform: 'other' }), setup({ platform: 'mac' })]) {
-    r.key(' '); r.key('w')
-    assert.equal(r.key('w').action.id, 'focus.next')
-    r.key(' '); r.key('w')
-    assert.equal(r.key('W', { shiftKey: true }).action.id, 'focus.prev')
+    r.key(' '); r.key('x')
+    assert.equal(r.key('x').action.id, 'focus.next')
+    r.key(' '); r.key('x')
+    assert.equal(r.key('X', { shiftKey: true }).action.id, 'focus.prev')
   }
+  // The old hand off the files tab: `SPC w w` does nothing at all, the menu stays at its root.
+  const old = setup()
+  old.key(' '); old.key('w'); old.key('w')
+  assert.deepEqual(old.ids(), [])
+  assert.deepEqual(old.router.state().menu, ['SPC'])
+})
+
+test('router: SPC w is the checkout picker on the files tab only; SPC v w is quiet there and the overlay elsewhere', () => {
+  for (const tab of ['list', 'board', 'gantt']) {
+    const r = setup({ ctx: browse({ tab }) })
+    r.key(' '); r.key('w')
+    assert.deepEqual(r.ids(), [], `${tab}: SPC w is quiet`)
+    r.key('Escape'); r.key(' '); r.key('v'); r.key('w')
+    assert.deepEqual(r.ids(), ['view.worktree'], `${tab}: SPC v w is the overlay`)
+  }
+  const files = setup({ ctx: browse({ tab: 'files', files: { diff: false, detail: false, changed: false } }) })
+  files.key(' ')
+  assert.equal(files.key('w').action.id, 'files.checkout')
+  assert.deepEqual(files.router.state().menu, null, 'an action: the menu closes')
+  files.key(' '); files.key('v'); files.key('w')
+  assert.deepEqual(files.ids(), ['files.checkout'], 'SPC v w does nothing on the files tab')
+  const wiki = setup({ ctx: { mode: 'wiki', tab: 'wiki', focus: 'list' } })
+  wiki.key(' '); wiki.key('w')
+  assert.deepEqual(wiki.ids(), [])
 })
 
 // ------------------------------------------------------------------ router: SPC menu
@@ -378,11 +405,11 @@ test('menu: a motion key the layer does not carry closes the menu and moves; lay
   key('Enter')
   assert.deepEqual(router.state().menu, ['SPC'], 'Enter is not a motion: ignored')
   key(' ')
-  // SPC w j exists but is unavailable with the detail on the left: it does not leak into a motion.
+  // SPC x j exists but is unavailable with the detail on the left: it does not leak into a motion.
   const left = setup({ ctx: browse({ detailAt: 'left' }) })
-  left.key(' '); left.key('w')
+  left.key(' '); left.key('x')
   assert.equal(left.key('j').action, undefined)
-  assert.deepEqual(left.router.state().menu, ['SPC', 'w'])
+  assert.deepEqual(left.router.state().menu, ['SPC', 'x'])
   assert.equal(left.key('l').action.id, 'focus.right')
   assert.deepEqual(ids(), ['move.down', 'move.bottom', 'move.down', 'cell.toggle', 'move.top'])
 })
@@ -390,8 +417,8 @@ test('menu: a motion key the layer does not carry closes the menu and moves; lay
 test('menu: unavailable layers and items cannot be entered; press() acts like the key', () => {
   const noDetail = setup({ ctx: browse({ detail: false }) })
   noDetail.key(' ')
-  noDetail.key('w')
-  assert.deepEqual(noDetail.router.state().menu, ['SPC'], 'SPC w is not offered without the detail')
+  noDetail.key('x')
+  assert.deepEqual(noDetail.router.state().menu, ['SPC'], 'SPC x is not offered without the detail')
   noDetail.key('o')
   // The zone picker stands whether or not the detail does (moai-ly88): SPC o is entered, with `t` alone in it.
   assert.deepEqual(noDetail.router.state().menu, ['SPC', 'o'], 'SPC o holds the zone picker without the detail')
@@ -441,7 +468,7 @@ test('router: wiki mode has its own keys and a wiki-sized SPC menu', () => {
   assert.deepEqual(router.state().menu, ['SPC', 'v'])
   key('Escape'); key(' '); key('s')
   assert.deepEqual(router.state().menu, ['SPC'], 'no sort layer in the wiki')
-  key('w'); key('l')
+  key('x'); key('l')
   assert.deepEqual(ids(), ['move.down', 'wiki.back', 'wiki.nextLink', 'wiki.prevLink', 'wiki.clear', 'wiki.search', 'wiki.enter', 'view.raw', 'focus.right'])
 })
 
@@ -460,8 +487,21 @@ test('menuLayer: root items and layers with titles; state labels; availability h
   const root = menuLayer(['SPC'], ctx)
   assert.equal(root.title, '메뉴')
   // `m` (read marks) stands while they can be written; `p` only with projects to jump to.
-  assert.deepEqual(root.items.map((i) => i.key), ['/', 'f', 'g', 'v', 's', 'c', 'm', 'o', 'w', '?'])
-  assert.deepEqual(menuLayer(['SPC'], browse({ readable: false, projects: ['a', 'b'] })).items.map((i) => i.key), ['/', 'f', 'p', 'g', 'v', 's', 'c', 'o', 'w', '?'])
+  assert.deepEqual(root.items.map((i) => i.key), ['/', 'f', 'g', 'v', 's', 'c', 'm', 'o', 'x', '?'])
+  assert.deepEqual(menuLayer(['SPC'], browse({ readable: false, projects: ['a', 'b'] })).items.map((i) => i.key), ['/', 'f', 'p', 'g', 'v', 's', 'c', 'o', 'x', '?'])
+  assert.equal(root.items.find((i) => i.key === 'x').label, '+창')
+  assert.equal(menuLayer(['SPC'], ctx, TABLE.en).items.find((i) => i.key === 'x').label, '+Window')
+  // The files tab: `w` is a leaf, the checkout picker, before the pane moves; `SPC v w` is gone from its view layer.
+  const filesCtx = browse({ tab: 'files', files: { diff: false, detail: false, changed: false } })
+  const filesRoot = menuLayer(['SPC'], filesCtx)
+  assert.deepEqual(filesRoot.items.map((i) => i.key), ['/', 'f', 'g', 'v', 's', 'c', 'm', 'o', 'w', 'x', '?'])
+  const checkout = filesRoot.items.find((i) => i.key === 'w')
+  assert.equal(checkout.kind, 'action')
+  assert.equal(checkout.action, 'files.checkout')
+  assert.equal(checkout.label, '체크아웃 고르기')
+  assert.equal(menuLayer(['SPC'], filesCtx, TABLE.en).items.find((i) => i.key === 'w').label, 'Choose checkout')
+  assert.ok(!menuLayer('SPC v', filesCtx).items.some((i) => i.key === 'w'), 'no SPC v w on the files tab')
+  assert.equal(menuLayer('SPC v', ctx).items.find((i) => i.key === 'w').label, menuLayer('SPC v', browse()).items.find((i) => i.key === 'w').label, 'SPC v w is the overlay off the files tab')
   const g = root.items.find((i) => i.key === 'g')
   assert.equal(g.kind, 'layer')
   assert.equal(g.label, '+이동')
@@ -471,7 +511,7 @@ test('menuLayer: root items and layers with titles; state labels; availability h
   assert.equal(view.title, '보기')
   assert.equal(view.waits, true)
   const byKey = Object.fromEntries(view.items.map((i) => [i.key, i]))
-  assert.deepEqual(view.items.map((i) => i.key), ['l', 'b', 'o', 'w', 'a', '1', '2', '3', 'd', 'r'], 'only three numbered columns')
+  assert.deepEqual(view.items.map((i) => i.key), ['l', 'b', 'o', 'D', 'w', 'a', '1', '2', '3', 'd', 'r'], 'only three numbered columns')
   assert.equal(byKey.l.state.label, '[숨김]')
   assert.equal(byKey.b.state.label, '[보임]')
   assert.equal(byKey.l.kind, 'toggle')
@@ -491,17 +531,20 @@ test('menuLayer: root items and layers with titles; state labels; availability h
   assert.equal(menuLayer('SPC o', browse({ detailAt: 'top' })).items[0].state.label, '[위]')
 
   // Focus moves follow the split axis; the detail position is gone when the panel is narrow.
-  assert.deepEqual(menuLayer('SPC w', ctx).items.map((i) => i.key), ['w', 'W', 'h', 'l'])
-  assert.deepEqual(menuLayer('SPC w', browse()).items.map((i) => i.key), ['w', 'W', 'j', 'k'])
+  assert.deepEqual(menuLayer('SPC x', ctx).items.map((i) => i.key), ['x', 'X', 'h', 'l'])
+  assert.deepEqual(menuLayer('SPC x', browse()).items.map((i) => i.key), ['x', 'X', 'j', 'k'])
+  assert.equal(menuLayer('SPC x', ctx).title, '창')
   assert.deepEqual(menuLayer('SPC o', browse({ detailAtLocked: true })).items.map((i) => i.key), ['t'])
   const hiddenDetail = menuLayer('SPC', browse({ detail: false })).items.map((i) => i.key)
+  assert.ok(!hiddenDetail.includes('x'))
   assert.ok(!hiddenDetail.includes('w'))
   assert.deepEqual(menuLayer('SPC o', browse({ detail: false })).items.map((i) => i.key), ['t'])
   assert.ok(!menuLayer('SPC v', browse({ detail: false })).items.some((i) => i.key === 'r'))
   // The wiki menu: tabs, raw, the zone picker, windows, help — and the projects when there are some.
-  assert.deepEqual(menuLayer('SPC', { mode: 'wiki' }).items.map((i) => i.key), ['g', 'v', 'o', 'w', '?'])
-  assert.deepEqual(menuLayer('SPC', { mode: 'wiki', projects: ['a'] }).items.map((i) => i.key), ['p', 'g', 'v', 'o', 'w', '?'])
-  assert.deepEqual(menuLayer('SPC g', { mode: 'wiki' }).items.map((i) => [i.key, i.action]), [['l', 'tab.list'], ['b', 'tab.board'], ['g', 'tab.gantt'], ['w', 'tab.wiki']])
+  assert.deepEqual(menuLayer('SPC', { mode: 'wiki' }).items.map((i) => i.key), ['g', 'v', 'o', 'x', '?'])
+  assert.deepEqual(menuLayer('SPC', { mode: 'wiki', projects: ['a'] }).items.map((i) => i.key), ['p', 'g', 'v', 'o', 'x', '?'])
+  // The tab strip's order (the wiki last); the letters are as they were.
+  assert.deepEqual(menuLayer('SPC g', { mode: 'wiki' }).items.map((i) => [i.key, i.action]), [['l', 'tab.list'], ['b', 'tab.board'], ['g', 'tab.gantt'], ['f', 'tab.files'], ['w', 'tab.wiki']])
 })
 
 test('helpSections: grouped rows, platform keys, availability', () => {
@@ -511,8 +554,18 @@ test('helpSections: grouped rows, platform keys, availability', () => {
   assert.ok(titles.includes('SPC 메뉴 안에서'))
   const row = (sections, action) => sections.flatMap((s) => s.rows).find((r) => r.action === action)
   assert.deepEqual(row(other, 'move.top').keys, ['g g', 'Home'])
-  assert.deepEqual(row(other, 'focus.next').keys, ['SPC w w'])
-  assert.deepEqual(row(helpSections('browse', browse(), 'mac'), 'focus.next').keys, ['SPC w w'])
+  assert.deepEqual(row(other, 'focus.next').keys, ['SPC x x'])
+  assert.deepEqual(row(helpSections('browse', browse(), 'mac'), 'focus.next').keys, ['SPC x x'])
+  assert.deepEqual(row(other, 'focus.prev').keys, ['SPC x X'])
+  assert.ok(!other.flatMap((s) => s.rows).some((r) => r.keys.some((k) => k.startsWith('SPC w '))), 'the help names no old key')
+  // The checkout picker: one row with its own words, available on the files tab only.
+  assert.deepEqual(row(other, 'files.checkout').keys, ['SPC w'])
+  assert.equal(row(other, 'files.checkout').label, '체크아웃 고르기')
+  assert.equal(row(other, 'files.checkout').available, false)
+  const filesHelp = helpSections('browse', browse({ tab: 'files', files: { diff: false, detail: false, changed: false } }), 'other')
+  assert.equal(row(filesHelp, 'files.checkout').available, true)
+  assert.equal(row(filesHelp, 'view.worktree').available, false)
+  assert.equal(row(other, 'view.worktree').available, true)
   assert.equal(row(other, 'focus.left').available, false, 'detail below: h/l do nothing')
   assert.equal(row(other, 'focus.down').available, true)
   assert.deepEqual(row(other, 'view.column').keys, ['SPC v 1~9'])
@@ -528,7 +581,7 @@ test('helpSections: grouped rows, platform keys, availability', () => {
   assert.equal(MENU_CONTROLS.length, 2)
   // The SPC v 1~9 row stands for all nine columns, not for the first column's name.
   assert.equal(row(helpSections('browse', browse({ columns: ['todo', 'doing'] }), 'other'), 'view.column').label, '1~9번째 칸')
-  // The wiki has no up/down panes: its help does not list SPC w j/k.
+  // The wiki has no up/down panes: its help does not list SPC x j/k.
   assert.equal(row(wiki, 'focus.up'), undefined)
   assert.equal(row(wiki, 'focus.down'), undefined)
   assert.ok(row(wiki, 'focus.left'))
@@ -541,7 +594,7 @@ test('keyLabel prints keys for kbd hints', () => {
   assert.equal(keyLabel('g g'), 'gg')
   assert.equal(keyLabel('Up'), '↑')
   assert.equal(keyLabel('C-w W'), 'Ctrl-w W')
-  assert.equal(keyLabel('SPC w w'), 'SPC w w')
+  assert.equal(keyLabel('SPC x x'), 'SPC x x')
   assert.equal(keyLabel('-'), '-')
 })
 
@@ -902,7 +955,7 @@ test('menu: no label in any layer outgrows its cell in any language, and the hel
   const width = (text) => [...text].reduce((sum, ch) => sum + (/[\u1100-\uffff]/.test(ch) ? 13 : 7), 0)
   const ctx = browse()
   for (const [lang, words] of Object.entries(TABLE)) {
-    for (const path of [['SPC'], ['SPC', 'v'], ['SPC', 's'], ['SPC', 'c'], ['SPC', 'o'], ['SPC', 'g'], ['SPC', 'w']]) {
+    for (const path of [['SPC'], ['SPC', 'v'], ['SPC', 's'], ['SPC', 'c'], ['SPC', 'o'], ['SPC', 'g'], ['SPC', 'x']]) {
       for (const item of menuLayer(path, ctx, words).items) assert.ok(width(item.label) <= 126, `${lang} ${path.join(' ')} ${item.key}: ${item.label}`)
     }
   }

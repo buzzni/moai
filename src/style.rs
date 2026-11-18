@@ -190,6 +190,141 @@ pub const CODE: Style = fg(AnsiColor::Cyan);
 pub const P0: Style = fg(AnsiColor::BrightRed).bold();
 pub const P1: Style = fg(AnsiColor::Red);
 
+/// The file window's tree (moai-ffk9.rpf, colours from the confirmed mockup). **The glyphs carry the meaning**: a
+/// directory has its fold mark and a trailing `/`, a link its `→`, an ignored or unopenable row a word — the colours
+/// only help the eye. Extension groups share one colour each, so the table stays small enough to learn.
+pub const FILE_DIR: Style = fg(AnsiColor::BrightBlue).bold();
+pub const FILE_LINK: Style = fg(AnsiColor::Cyan);
+/// Source code — the mockup's orange; the 16-colour yellow is orange on most dark themes.
+pub const FILE_SOURCE: Style = fg(AnsiColor::Yellow);
+pub const FILE_DOC: Style = fg(AnsiColor::Magenta);
+pub const FILE_DATA: Style = fg(AnsiColor::Green);
+pub const FILE_SCRIPT: Style = fg(AnsiColor::BrightGreen);
+/// Pictures, archives, builds and lock files — nothing to read as text.
+pub const FILE_BINARY: Style = DIM;
+
+/// The diff pane (moai-ffk9.41b, the mockup's colours in 16). **Each sits beside a glyph that says the same**: added
+/// and removed colour only the line numbers and the `+`·`-` mark (the text keeps its syntax colours; no background
+/// is painted — in sixteen colours it fights them), the hunk head starts with `@@`.
+pub const DIFF_ADD: Style = fg(AnsiColor::Green);
+pub const DIFF_DEL: Style = fg(AnsiColor::Red);
+pub const DIFF_HUNK: Style = fg(AnsiColor::BrightBlue);
+
+/// The colour of a change mark (moai-p7nr.c67, the person's palette "안 A") — the file tree's first column and the
+/// diff pane's file heads alike, so one file never stands in two colours. **The letter says the kind**; the colour only
+/// helps the eye. Added and deleted are the diff lines' own colours.
+pub fn change_mark(mark: crate::vcs::Mark) -> Style {
+    use crate::vcs::Mark as M;
+    match mark {
+        M::Modified => fg(AnsiColor::Yellow),
+        M::Added => DIFF_ADD,
+        M::Deleted => DIFF_DEL,
+        M::Renamed => fg(AnsiColor::Cyan),
+    }
+}
+
+/// A file's extension group: source · docs and markup · config and data · scripts · pictures and binaries · the
+/// rest. **One table for both surfaces** (moai-dy7a.w38) — the TUI paints it through [`group_style`] and `moai web`
+/// receives it whole in `/api/boot`'s `file_groups`, so the two never sort one name into two groups.
+#[derive(Clone, Copy, PartialEq, Eq, Debug)]
+pub enum FileGroup {
+    Source,
+    Doc,
+    Data,
+    Script,
+    Binary,
+    Plain,
+}
+
+impl FileGroup {
+    /// The word `/api/boot` and the page's class list use (`m-files-kind-<name>`).
+    pub fn name(self) -> &'static str {
+        match self {
+            FileGroup::Source => "source",
+            FileGroup::Doc => "doc",
+            FileGroup::Data => "data",
+            FileGroup::Script => "script",
+            FileGroup::Binary => "binary",
+            FileGroup::Plain => "plain",
+        }
+    }
+}
+
+/// The groups with their lower-case extensions and their whole names. An extension is looked up first, across every
+/// group; a whole name only when no extension matched — `Makefile` has none.
+pub const FILE_GROUPS: [(FileGroup, &[&str], &[&str]); 5] = [
+    (
+        FileGroup::Source,
+        &[
+            "rs", "c", "h", "cc", "cpp", "hpp", "go", "py", "js", "mjs", "cjs", "ts", "tsx", "jsx", "java", "kt",
+            "swift", "rb", "php", "cs", "scala", "lua", "zig", "hs", "ml", "ex", "exs", "erl", "clj", "dart", "vue",
+            "svelte", "css", "scss", "less", "sql",
+        ],
+        &[],
+    ),
+    (FileGroup::Doc, &["md", "markdown", "txt", "rst", "adoc", "html", "htm", "xml", "tex", "org"], &[]),
+    (FileGroup::Data, &["toml", "json", "jsonl", "yaml", "yml", "ini", "cfg", "conf", "csv", "tsv", "env"], &[]),
+    (
+        FileGroup::Script,
+        &["sh", "bash", "zsh", "fish", "ps1", "bat", "cmd"],
+        &["Makefile", "Dockerfile", "justfile", "Justfile"],
+    ),
+    (
+        FileGroup::Binary,
+        &[
+            "png", "jpg", "jpeg", "gif", "webp", "ico", "bmp", "svg", "pdf", "zip", "gz", "tar", "tgz", "xz", "bz2",
+            "7z", "so", "dylib", "dll", "exe", "bin", "o", "a", "wasm", "woff", "woff2", "ttf", "otf", "mp4", "mov",
+            "mp3", "wav", "lock",
+        ],
+        &[],
+    ),
+];
+
+/// The group of a file name, by [`FILE_GROUPS`].
+pub fn file_group(name: &str) -> FileGroup {
+    let ext = crate::files::ext_of(name).to_ascii_lowercase();
+    let by_ext = FILE_GROUPS.iter().find(|(_, exts, _)| exts.contains(&ext.as_str()));
+    by_ext
+        .or_else(|| FILE_GROUPS.iter().find(|(_, _, names)| names.contains(&name)))
+        .map_or(FileGroup::Plain, |(group, _, _)| *group)
+}
+
+/// A group's colour in the TUI; the rest stays unpainted.
+pub fn group_style(group: FileGroup) -> Style {
+    match group {
+        FileGroup::Source => FILE_SOURCE,
+        FileGroup::Doc => FILE_DOC,
+        FileGroup::Data => FILE_DATA,
+        FileGroup::Script => FILE_SCRIPT,
+        FileGroup::Binary => FILE_BINARY,
+        FileGroup::Plain => PLAIN,
+    }
+}
+
+/// A file's colour by its extension group.
+pub fn file_style(name: &str) -> Style {
+    group_style(file_group(name))
+}
+
+/// Syntax colours for file text (moai-ffk9.3fd), after the confirmed mockup in 16 colours. **They carry no meaning**
+/// — the text reads the same without them — so no glyph stands beside them. Comments are grey and italic, so they
+/// fall back even on a terminal that draws no italic.
+pub fn syntax(kind: crate::highlight::Kind) -> Style {
+    use crate::highlight::Kind as K;
+    match kind {
+        K::Comment => fg(AnsiColor::BrightBlack).italic(),
+        K::String => fg(AnsiColor::BrightCyan),
+        K::Number | K::Constant => fg(AnsiColor::BrightBlue),
+        K::Keyword => fg(AnsiColor::BrightRed),
+        K::Type => fg(AnsiColor::Yellow),
+        K::Function => fg(AnsiColor::BrightMagenta),
+        K::Tag => fg(AnsiColor::Green),
+        K::Attribute => fg(AnsiColor::Cyan),
+        K::Heading => fg(AnsiColor::BrightBlue).bold(),
+        K::Other => PLAIN,
+    }
+}
+
 /// 칸 이름 → 글리프. 모르는 칸도 글리프를 갖는다.
 pub fn glyph(status: &str) -> &'static str {
     match status {
