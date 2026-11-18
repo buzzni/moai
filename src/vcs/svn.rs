@@ -94,9 +94,9 @@ fn revision_diff(
     }
 }
 
-/// The files the revisions changed, from each one's text diff, oldest first as given: added and deleted by svn's
-/// `(nonexistent)` label, a later edit keeping a file added earlier added (as Git's list does), lines summed. A diff
-/// past [`PATCH_LIMIT`] drops its last section and marks the list cut — it is not whole.
+/// The files the revisions changed, from each one's text diff and its summary ([`summary`]), oldest first as given:
+/// added and deleted as the summary says, a later edit keeping a file added earlier added (as Git's list does), lines
+/// summed. A diff past [`PATCH_LIMIT`] drops its last section and marks the list cut — it is not whole.
 fn commits_changes(root: &Path, revs: &[u64], budget: Option<Duration>) -> Result<Changes, Error> {
     let deadline = Deadline::of(budget);
     let here = crate::svn::info(root, "", deadline.left())?;
@@ -105,7 +105,9 @@ fn commits_changes(root: &Path, revs: &[u64], budget: Option<Duration>) -> Resul
     for &rev in revs {
         deadline.check()?;
         let (out, cut) = revision_diff(root, &here, rev, &deadline)?;
-        diff_rows(&out, cut, &mut rows);
+        let target = [Arg::Value("-c", rev.to_string()), Arg::Url(&here.url, Some(here.revision))];
+        let said = summary(root, &here.url, &target, &deadline)?;
+        diff_rows(&out, cut, said.as_ref(), &mut rows);
         if cut {
             cut_any = true;
             break;
@@ -116,30 +118,73 @@ fn commits_changes(root: &Path, revs: &[u64], budget: Option<Duration>) -> Resul
     Ok(Changes { files, total, truncated: cut_any || total > FILE_LIMIT })
 }
 
-/// The files one svn text diff holds, folded into `rows`: added and deleted by svn's `(nonexistent)` label, a file
-/// added by an earlier diff staying added through a later edit (as Git's list does), lines summed. A diff cut at
+/// What `diff --summarize` says of each file of one diff — the same target as the text diff, read once more from the
+/// server (moai-0d0s, epic-end review finding 2). The text diff alone cannot tell an added or deleted binary or empty
+/// file from an edit: svn prints no `---`/`+++` lines for them, and nothing at all for a deleted empty file. Paths are
+/// URLs below `base` ([`crate::svn::below`]), checked like every svn path ([`clean`]); directories and anything else
+/// that is no file are left out. `None` when svn's answer passed [`LIST_LIMIT`]: the text diff's own word stands then.
+fn summary(
+    root: &Path,
+    base: &str,
+    target: &[Arg],
+    deadline: &Deadline,
+) -> Result<Option<BTreeMap<String, Status>>, Error> {
+    let mut args = vec![Arg::Summarize];
+    args.extend_from_slice(target);
+    let (out, cut) = match crate::svn::run(root, Sub::Diff, &args, LIST_LIMIT, deadline.left()) {
+        Err(crate::svn::Error::Failed(why)) if crate::svn::codes(&why).any(|c| NOT_IN_HISTORY.contains(&c)) => {
+            return Ok(Some(BTreeMap::new()));
+        }
+        read => read?,
+    };
+    if cut {
+        return Ok(None);
+    }
+    Ok(Some(summary_of(&String::from_utf8_lossy(&out), base)))
+}
+
+/// `diff --summarize --xml` read as project path → status. Pure.
+fn summary_of(text: &str, base: &str) -> BTreeMap<String, Status> {
+    let doc = crate::svn::xml::parse(text);
+    let Some(paths) = doc.child("diff").and_then(|d| d.child("paths")) else { return BTreeMap::new() };
+    paths
+        .children("path")
+        .filter(|p| p.attr("kind") == Some("file"))
+        .filter_map(|p| {
+            let status = match p.attr("item")? {
+                "added" => Status::Added,
+                "deleted" => Status::Deleted,
+                // As the working list reads a replaced file.
+                "modified" | "replaced" => Status::Modified,
+                _ => return None,
+            };
+            let path = crate::svn::below(base, p.text().trim()).and_then(|p| clean(&p))?;
+            Some((path, status))
+        })
+        .collect()
+}
+
+/// The files one svn text diff holds, folded into `rows`: a file added by an earlier diff staying added through a later
+/// edit (as Git's list does), lines summed. The status is the summary's (`said`) where it names the file, else svn's
+/// `(nonexistent)` label. A file only the summary names — svn printed nothing for it, an empty file — is a row of no
+/// lines; while the text is whole only, since past the cut it cannot be told from a file not read. A diff cut at
 /// [`PATCH_LIMIT`] drops its last section, which may be partial — the caller marks the list cut.
-fn diff_rows(out: &[u8], cut: bool, rows: &mut BTreeMap<String, Change>) {
+fn diff_rows(out: &[u8], cut: bool, said: Option<&BTreeMap<String, Status>>, rows: &mut BTreeMap<String, Change>) {
     let mut parsed = crate::diff::parse(&String::from_utf8_lossy(out));
     if cut {
         parsed.pop();
     }
+    let mut seen = BTreeSet::new();
     for f in parsed {
         let Some(path) = f.new_path.as_deref().or(f.old_path.as_deref()).and_then(clean) else { continue };
-        let status = match (&f.old_path, &f.new_path) {
+        let labelled = match (&f.old_path, &f.new_path) {
             (None, _) => Status::Added,
             (_, None) => Status::Deleted,
             _ => Status::Modified,
         };
-        let change = rows
-            .entry(path.clone())
-            .and_modify(|c| {
-                let kept = status == Status::Modified && c.status == Status::Added;
-                if !kept {
-                    c.status = status;
-                }
-            })
-            .or_insert_with(|| row(path, status));
+        let status = said.and_then(|s| s.get(&path)).copied().unwrap_or(labelled);
+        seen.insert(path.clone());
+        let change = fold(rows, path, status);
         if f.binary {
             change.binary = true;
             change.adds = None;
@@ -152,6 +197,28 @@ fn diff_rows(out: &[u8], cut: bool, rows: &mut BTreeMap<String, Change>) {
             change.dels = Some(change.dels.unwrap_or(0).saturating_add(dels));
         }
     }
+    if cut {
+        return;
+    }
+    for (path, status) in said.into_iter().flatten().filter(|(p, _)| !seen.contains(*p)) {
+        let change = fold(rows, path.clone(), *status);
+        if !change.binary {
+            change.adds = Some(change.adds.unwrap_or(0));
+            change.dels = Some(change.dels.unwrap_or(0));
+        }
+    }
+}
+
+/// The row of `path` with one more diff's `status` folded in: a file added earlier stays added through a later edit.
+fn fold(rows: &mut BTreeMap<String, Change>, path: String, status: Status) -> &mut Change {
+    rows.entry(path.clone())
+        .and_modify(|c| {
+            let kept = status == Status::Modified && c.status == Status::Added;
+            if !kept {
+                c.status = status;
+            }
+        })
+        .or_insert_with(|| row(path, status))
 }
 
 /// What `branch` and `whole` read, by where the working copy stands (moai-0d0s.x27).
@@ -206,8 +273,10 @@ fn ranged_changes(root: &Path, branch: bool, budget: Option<Duration>) -> Result
         Reach::Fork { old, rev } => (old, rev),
     };
     let (out, cut) = fork_diff(root, &old, rev, branch, &deadline)?;
+    let new = if branch { Arg::NewBase("") } else { Arg::New("") };
+    let said = summary(root, &old, &[Arg::Old(&old, rev), new], &deadline)?;
     let mut rows = BTreeMap::new();
-    diff_rows(&out, cut, &mut rows);
+    diff_rows(&out, cut, said.as_ref(), &mut rows);
     if !branch {
         for path in list(root, &deadline)?.untracked() {
             rows.entry(path.clone()).or_insert_with(|| row(path, Status::Untracked));
@@ -1466,6 +1535,102 @@ mod tests {
         let p = Backend::Svn.patch(&wc, &Scope::Branch, None, None).unwrap();
         assert!(p.text.contains("+n\n") && !p.text.contains("+local"), "{}", p.text);
         assert_eq!(admin_snapshot(&wc), before, ".svn changed");
+    }
+
+    /// **A binary or empty file added or deleted is `added`/`deleted` in every server scope, and a deleted empty file is a
+    /// row** (epic-end review finding 2). svn's text diff prints no `---`/`+++` for such files — a binary one is a bare
+    /// `Index:` with "Cannot display", an added empty one a bare `Index:`, a deleted empty one nothing — so the list once
+    /// read them as `Modified` or lost them. The summary (`diff --summarize`) says which; `.svn` stays as it was.
+    #[test]
+    fn binary_and_empty_files_are_added_and_deleted_in_every_server_scope() {
+        if !svn_ready() {
+            return;
+        }
+        use Status::*;
+        let repo = Repo::new("vcs-svn-summary");
+        let trunk = repo.checkout("trunk", "trunk-wc");
+        commit_files(&trunk, &[("a.txt", "a\n"), ("old.bin", "\0\x01"), ("old-empty.txt", "")], "r2 base");
+        repo.branch("x"); // r3
+        let wc = repo.checkout("branches/x", "branch-wc");
+        commit_files(&wc, &[("b.bin", "\0\x02"), ("empty.txt", "")], "r4 adds");
+        for gone in ["b.bin", "empty.txt", "old.bin", "old-empty.txt"] {
+            svn_in(&wc, &["rm", "-q", &crate::svn::literal(gone)]);
+        }
+        svn_in(&wc, &["commit", "-q", "-m", "r5 deletes"]);
+        commit_files(&wc, &[("b2.bin", "\0\x03"), ("empty2.txt", "")], "r6 adds again");
+        fs::write(wc.join("local-empty.txt"), "").unwrap();
+        svn_in(&wc, &["add", "-q", "./local-empty.txt@"]);
+        let before = admin_snapshot(&wc);
+        let commits = |revs: &[&str]| Scope::Commits(revs.iter().map(|r| r.to_string()).collect());
+
+        let added = Backend::Svn.changes(&wc, &commits(&["r4"]), None).unwrap();
+        assert_eq!(paths(&added), [("b.bin", Added), ("empty.txt", Added)], "{added:?}");
+        assert!(find(&added, "b.bin").binary);
+        assert_eq!((find(&added, "empty.txt").adds, find(&added, "empty.txt").dels), (Some(0), Some(0)));
+        let deleted = Backend::Svn.changes(&wc, &commits(&["r5"]), None).unwrap();
+        assert_eq!(
+            paths(&deleted),
+            [("b.bin", Deleted), ("empty.txt", Deleted), ("old-empty.txt", Deleted), ("old.bin", Deleted)],
+            "the deleted empty files are rows too: {deleted:?}"
+        );
+        let both = Backend::Svn.changes(&wc, &commits(&["r4", "r5"]), None).unwrap();
+        assert_eq!(find(&both, "empty.txt").status, Deleted, "added then deleted is deleted");
+
+        let b = Backend::Svn.changes(&wc, &Scope::Branch, None).unwrap();
+        assert_eq!(
+            paths(&b),
+            [("b2.bin", Added), ("empty2.txt", Added), ("old-empty.txt", Deleted), ("old.bin", Deleted)],
+            "{b:?}"
+        );
+        let w = Backend::Svn.changes(&wc, &Scope::Whole, None).unwrap();
+        assert_eq!(
+            paths(&w),
+            [
+                ("b2.bin", Added),
+                ("empty2.txt", Added),
+                ("local-empty.txt", Added),
+                ("old-empty.txt", Deleted),
+                ("old.bin", Deleted),
+            ],
+            "{w:?}"
+        );
+        assert_eq!(admin_snapshot(&wc), before, ".svn changed");
+    }
+
+    /// The summary's paths are URLs: only a path strictly below the target, each component plain once decoded, is one.
+    #[test]
+    fn summary_paths_are_read_below_their_target_only() {
+        let base = "file:///r/branches/x%20y";
+        let xml = |p: &str, item: &str, kind: &str| {
+            format!(
+                "<?xml version=\"1.0\"?><diff><paths><path item=\"{item}\" props=\"none\" kind=\"{kind}\">{p}</path></paths></diff>"
+            )
+        };
+        let read = |p: &str, item: &str, kind: &str| summary_of(&xml(p, item, kind), base);
+        let one = |path: &str, status| BTreeMap::from([(path.to_owned(), status)]);
+        assert_eq!(
+            read("file:///r/branches/x%20y/d/%ED%95%9C@1.txt", "added", "file"),
+            one("d/한@1.txt", Status::Added)
+        );
+        assert_eq!(
+            read("file:///r/branches/x y/a", "deleted", "file"),
+            one("a", Status::Deleted),
+            "encoded either way"
+        );
+        assert_eq!(read("file:///r/branches/x%20y/a", "replaced", "file"), one("a", Status::Modified));
+        for (p, item, kind) in [
+            ("file:///r/branches/x%20y/d", "added", "dir"),
+            ("file:///r/branches/x%20y/a", "none", "file"),
+            ("file:///r/branches/x%20y", "modified", "file"),
+            ("file:///r/branches/other/a", "added", "file"),
+            ("file:///r/branches/x%20y/../../etc/passwd", "added", "file"),
+            ("file:///r/branches/x%20y/%2E%2E/a", "added", "file"),
+            ("file:///r/branches/x%20y/d%2F..%2F..%2Fa", "added", "file"),
+            ("file:///r/branches/x%20y/.svn/wc.db", "added", "file"),
+            ("file:///r/branches/x%20y/bad%zz", "added", "file"),
+        ] {
+            assert!(read(p, item, kind).is_empty(), "{p} {item} {kind}");
+        }
     }
 
     #[test]

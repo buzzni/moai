@@ -76,6 +76,12 @@ pub(crate) enum Arg<'a> {
     /// 읽어 `E155010: The node '…/m.txt@' was not found` 로 죽는다. `-` 로 시작하는 이름은 `./` 가 막는다.
     /// `info`·`status` 의 경로는 [`Arg::Path`] 다.
     Local(&'a str),
+    /// `--summarize --xml` — `diff` 가 글 대신 파일마다 `item`(added·deleted·modified)과 `kind` 를 낸다. 바이너리·빈 파일의
+    /// 더함·지움은 글 diff 에 `---`/`+++` 줄이 없어 거기서는 못 가린다(에픽 끝 리뷰 2번, svn 1.14.3 실측). 이것이 선
+    /// `diff` 에는 `--internal-diff` 를 안 단다 — svn 이 둘을 함께 받지 않고(`E205000`), 요약은 diff 프로그램을 부르지
+    /// 않는다(사람의 `diff-cmd` 를 걸어 재 봤다). `--show-copies-as-adds` 도 안 받지만, 복사된 디렉터리의 파일은 그것
+    /// 없이도 하나하나 `added` 로 선다. 경로는 대상 URL(URL 대 작업 사본이면 `--old` 의 URL) 밑의 인코딩된 URL 이다 — [`below`].
+    Summarize,
 }
 
 impl Arg<'_> {
@@ -111,7 +117,7 @@ pub(crate) fn reaches_server(sub: Sub, args: &[Arg]) -> bool {
 /// svn 을 띄울 명령 한 벌 — **짓는 자리는 여기 하나다.**
 ///
 /// `diff` 는 언제나 `--internal-diff` 를 단다 — 사람의 `diff-cmd` 설정이 다른 프로그램을 부르지
-/// 않게. `--ignore-properties` 도 함께다: 속성 변경은 diff 에 내지 않는다(에픽이 정한 것).
+/// 않게. 하나뿐인 예외는 [`Arg::Summarize`] 다 — svn 이 그것과 함께는 안 받고, 요약은 diff 프로그램을 안 부른다. `--ignore-properties` 도 함께다: 속성 변경은 diff 에 내지 않는다(에픽이 정한 것).
 /// `status` 는 `--ignore-externals` 를 단다 — `svn:externals` 너머를 훑지 않는다.
 pub(crate) fn command(root: &Path, sub: Sub, args: &[Arg]) -> std::process::Command {
     let mut cmd = std::process::Command::new("svn");
@@ -122,6 +128,9 @@ pub(crate) fn command(root: &Path, sub: Sub, args: &[Arg]) -> std::process::Comm
         cmd.arg("--config-dir").arg(dir);
     }
     match sub {
+        Sub::Diff if args.iter().any(|a| matches!(a, Arg::Summarize)) => {
+            cmd.arg("--ignore-properties");
+        }
         Sub::Diff => {
             cmd.args(["--internal-diff", "--ignore-properties"]);
         }
@@ -155,6 +164,9 @@ pub(crate) fn command(root: &Path, sub: Sub, args: &[Arg]) -> std::process::Comm
             }
             Arg::Local(p) => {
                 cmd.arg(format!("./{p}"));
+            }
+            Arg::Summarize => {
+                cmd.args(["--summarize", "--xml"]);
             }
         }
     }
@@ -468,6 +480,17 @@ pub(crate) fn url(repos_root: &str, path: &[String]) -> Option<String> {
         }
     }
     Some(out)
+}
+
+/// The project path of `url` below `base` — both as svn prints them, so each is decoded component by component before
+/// they are compared and an encoding svn chose differently from [`url`] still matches. Every component below must be
+/// [`plain`] once decoded; `None` when `url` is not strictly below `base` or a component is not. What `diff
+/// --summarize` prints is **untrusted** like any svn path: the caller still checks the result as it checks the rest.
+pub(crate) fn below(base: &str, url: &str) -> Option<String> {
+    let split = |u: &str| u.trim_end_matches('/').split('/').map(decoded).collect::<Option<Vec<_>>>();
+    let (base, url) = (split(base)?, split(url)?);
+    let rest = url.strip_prefix(base.as_slice())?;
+    (!rest.is_empty() && rest.iter().all(|c| plain(c))).then(|| rest.join("/"))
 }
 
 /// `/a/b` as `log` prints a repository path, split into plain components; `None` otherwise.
@@ -890,6 +913,12 @@ pub(crate) mod tests {
         }
         let diff = argv(&command(root, Sub::Diff, &[]));
         assert!(diff.iter().any(|a| a == "--internal-diff"), "diff 는 사람의 diff-cmd 를 안 부른다");
+        // 요약만 `--internal-diff` 없이 선다 — svn 이 함께 안 받는다. 속성은 그대로 안 본다.
+        let summary = argv(&command(root, Sub::Diff, &[Arg::Summarize, Arg::Url("file:///r", Some(2))]));
+        assert!(!summary.iter().any(|a| a == "--internal-diff"), "{summary:?}");
+        for flag in ["--ignore-properties", "--summarize", "--xml", "--non-interactive"] {
+            assert!(summary.iter().any(|a| a == flag), "{flag}: {summary:?}");
+        }
         assert!(argv(&command(root, Sub::Status, &[])).iter().any(|a| a == "--ignore-externals"));
     }
 
