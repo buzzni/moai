@@ -13697,3 +13697,5 @@
 {"ts":"2026-11-18T11:26:46Z","id":"moai-0d0s.aqa","kind":"note","by":"레이븐","by_email":"raven@buzzni.com","text":"model: anthropic/sonnet-5.5 (medium — 아카이브 시험 시계)"}
 {"ts":"2026-11-18T11:26:46Z","id":"moai-q16k","kind":"note","by":"레이븐","by_email":"raven@buzzni.com","text":"model: anthropic/sonnet-5.5 (medium — 웹 머리)"}
 {"ts":"2026-11-18T11:26:46Z","id":"moai-0d0s","kind":"note","by":"레이븐","by_email":"raven@buzzni.com","text":"Report-checked: b4863355 merge into milestone/moai-t7db"}
+{"ts":"2026-11-18T11:28:06Z","id":"moai-ovds","kind":"create","by":"레이븐","by_email":"raven@buzzni.com","title":"v1.5.0 릴리스 — 소식 글과 그림, develop→main PR"}
+{"ts":"2026-11-18T11:28:06Z","id":"moai-ovds","kind":"status","by":"레이븐","by_email":"raven@buzzni.com","from":"todo","to":"in_progress"}
