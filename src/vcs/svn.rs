@@ -17,7 +17,8 @@
 //!   inside an `svn rm`'d or copied directory it prints nothing, so such a name is read through its directory and the
 //!   other files' sections are dropped ([`keep_sections`])
 //! - the scopes: `working` is BASE against the working copy; `whole` is the same until the fork point is known
-//!   (moai-0d0s.x27); `branch` is [`super::NoBase`]; `commits` is not served yet (moai-0d0s.4o8)
+//!   (moai-0d0s.x27); `branch` is [`super::NoBase`]; `commits` reads each revision `r<n>` from the repository, the
+//!   root's URL at its BASE — the revisions themselves come from [`crate::svn::commits_within`] (moai-0d0s.4o8)
 
 use super::{Change, Changes, Error, FILE_LIMIT, LIST_LIMIT, PATCH_LIMIT, Patch, Scope, Status};
 use crate::svn::{Arg, Sub};
@@ -39,16 +40,145 @@ impl Deadline {
     }
 }
 
-/// The scopes this member serves read the working copy; the others answer with their own error.
+/// Whether the scope is served here: `working`·`whole` read the working copy, `commits` its revisions — each one
+/// `r<number>` or the whole call is [`Error::InvalidRevision`] before svn is spawned. `branch` has its own error.
 fn served(scope: &Scope) -> Result<(), Error> {
     match scope {
         Scope::Working | Scope::Whole => Ok(()),
+        Scope::Commits(revs) => revisions(revs).map(drop),
         Scope::Branch => Err(Error::NoBase(super::NoBase::Unread)),
-        // moai-0d0s.4o8 builds the id → revision table and replaces this.
-        Scope::Commits(_) => {
-            Err(Error::Svn(crate::svn::Error::Failed("the commits scope is not served for svn yet".into())))
+    }
+}
+
+/// A revision as the `commits` scope names it — `r` and one to ten digits, not zero (moai-0d0s.4o8). Nothing else
+/// reaches svn's command line: not `12`, not `r`, not `r12 --diff-cmd=x`.
+fn revision(word: &str) -> Option<u64> {
+    let digits = word.strip_prefix('r')?;
+    let shaped = (1..=10).contains(&digits.len()) && digits.bytes().all(|b| b.is_ascii_digit());
+    shaped.then(|| digits.parse().ok()).flatten().filter(|&n| n > 0)
+}
+fn revisions(revs: &[String]) -> Result<Vec<u64>, Error> {
+    revs.iter().map(|r| revision(r).ok_or(Error::InvalidRevision)).collect()
+}
+
+/// svn's word for "this target is not in that revision's history": the path was made later (`E160013`, measured on
+/// 1.14.3), or cannot be traced to it (`E195012`). Such a revision has nothing here — it is no failure.
+const NOT_IN_HISTORY: &[&str] = &["E160013", "E195012"];
+
+/// One revision's diff against the one before it, read from the repository — **never from the working copy**: the
+/// target is the root's URL pegged at its BASE revision, so svn follows that path's history (a branch's copy back to
+/// trunk) and a revision that touched only another branch prints nothing. Server calls keep their 30-second limit.
+fn revision_diff(
+    root: &Path,
+    here: &crate::svn::Info,
+    rev: u64,
+    deadline: &Deadline,
+) -> Result<(Vec<u8>, bool), Error> {
+    let args = [
+        Arg::Flag("--show-copies-as-adds"),
+        Arg::Value("-c", rev.to_string()),
+        Arg::Url(&here.url, Some(here.revision)),
+    ];
+    match crate::svn::run(root, Sub::Diff, &args, PATCH_LIMIT, deadline.left()) {
+        Err(crate::svn::Error::Failed(why)) if crate::svn::codes(&why).any(|c| NOT_IN_HISTORY.contains(&c)) => {
+            Ok((Vec::new(), false))
+        }
+        read => Ok(read?),
+    }
+}
+
+/// The files the revisions changed, from each one's text diff, oldest first as given: added and deleted by svn's
+/// `(nonexistent)` label, a later edit keeping a file added earlier added (as Git's list does), lines summed. A diff
+/// past [`PATCH_LIMIT`] drops its last section and marks the list cut — it is not whole.
+fn commits_changes(root: &Path, revs: &[u64], budget: Option<Duration>) -> Result<Changes, Error> {
+    let deadline = Deadline::of(budget);
+    let here = crate::svn::info(root, "", deadline.left())?;
+    let mut rows: BTreeMap<String, Change> = BTreeMap::new();
+    let mut cut_any = false;
+    for &rev in revs {
+        deadline.check()?;
+        let (out, cut) = revision_diff(root, &here, rev, &deadline)?;
+        let mut parsed = crate::diff::parse(&String::from_utf8_lossy(&out));
+        if cut {
+            parsed.pop();
+            cut_any = true;
+        }
+        for f in parsed {
+            let Some(path) = f.new_path.as_deref().or(f.old_path.as_deref()).and_then(clean) else { continue };
+            let status = match (&f.old_path, &f.new_path) {
+                (None, _) => Status::Added,
+                (_, None) => Status::Deleted,
+                _ => Status::Modified,
+            };
+            let change = rows
+                .entry(path.clone())
+                .and_modify(|c| {
+                    let kept = status == Status::Modified && c.status == Status::Added;
+                    if !kept {
+                        c.status = status;
+                    }
+                })
+                .or_insert_with(|| row(path, status));
+            if f.binary {
+                change.binary = true;
+                change.adds = None;
+                change.dels = None;
+            } else if !change.binary {
+                let lines = f.hunks.iter().flat_map(|h| &h.lines);
+                let adds = lines.clone().filter(|l| l.kind == crate::diff::LineKind::Add).count();
+                let dels = lines.filter(|l| l.kind == crate::diff::LineKind::Delete).count();
+                change.adds = Some(change.adds.unwrap_or(0).saturating_add(adds));
+                change.dels = Some(change.dels.unwrap_or(0).saturating_add(dels));
+            }
+        }
+        if cut_any {
+            break;
         }
     }
+    let total = rows.len();
+    let files: Vec<_> = rows.into_values().take(FILE_LIMIT).collect();
+    Ok(Changes { files, total, truncated: cut_any || total > FILE_LIMIT })
+}
+
+/// The revisions' diffs one after another, each whole from the server and narrowed here to the files and folders
+/// asked ([`keep_sections`]) — names never reach svn. Past [`PATCH_LIMIT`] the text is cut and says so.
+fn commits_patch(
+    root: &Path,
+    revs: &[u64],
+    paths: Option<&[String]>,
+    budget: Option<Duration>,
+) -> Result<Patch, Error> {
+    let deadline = Deadline::of(budget);
+    let here = crate::svn::info(root, "", deadline.left())?;
+    let mut out = Vec::new();
+    let mut truncated = false;
+    for &rev in revs {
+        deadline.check()?;
+        let (data, cut) = revision_diff(root, &here, rev, &deadline)?;
+        match paths {
+            Some(specs) => out.extend(keep_sections(&data, specs)),
+            None => out.extend(data),
+        }
+        truncated |= cut;
+        if truncated || out.len() > PATCH_LIMIT {
+            break;
+        }
+    }
+    Ok(capped(out, truncated))
+}
+
+/// The text of a patch, cut at [`PATCH_LIMIT`] on a character boundary.
+fn capped(out: Vec<u8>, mut truncated: bool) -> Patch {
+    let mut text = String::from_utf8_lossy(&out).into_owned();
+    if text.len() > PATCH_LIMIT {
+        let mut end = PATCH_LIMIT;
+        while !text.is_char_boundary(end) {
+            end -= 1;
+        }
+        text.truncate(end);
+        truncated = true;
+    }
+    Patch { text, truncated }
 }
 
 /// Whether a relative, `/`-separated path is one svn may name and this crate may open: plain components only — no
@@ -325,6 +455,10 @@ fn counts(root: &Path, rows: &mut BTreeMap<String, Change>, deadline: &Deadline)
 pub(super) fn changes(root: &Path, scope: &Scope, budget: Option<Duration>) -> Result<Changes, Error> {
     served(scope)?;
     let root = root.to_path_buf();
+    if let Scope::Commits(revs) = scope {
+        let revs = revisions(revs)?;
+        return super::timed(budget, move || commits_changes(&root, &revs, budget));
+    }
     super::timed(budget, move || changes_inner(&root, budget))
 }
 fn changes_inner(root: &Path, budget: Option<Duration>) -> Result<Changes, Error> {
@@ -395,6 +529,10 @@ pub(super) fn patch(
         return Err(Error::InvalidPath);
     }
     let root = root.to_path_buf();
+    if let Scope::Commits(revs) = scope {
+        let revs = revisions(revs)?;
+        return super::timed(budget, move || commits_patch(&root, &revs, paths.as_deref(), budget));
+    }
     super::timed(budget, move || patch_inner(&root, paths.as_deref(), budget, known))
 }
 fn patch_inner(
@@ -444,16 +582,7 @@ fn patch_inner(
             }
         }
     }
-    let mut text = String::from_utf8_lossy(&out).into_owned();
-    if text.len() > PATCH_LIMIT {
-        let mut end = PATCH_LIMIT;
-        while !text.is_char_boundary(end) {
-            end -= 1;
-        }
-        text.truncate(end);
-        truncated = true;
-    }
-    Ok(Patch { text, truncated })
+    Ok(capped(out, truncated))
 }
 
 /// The ignored directories, each with its trailing `/`, and `.svn/` always: `status --no-ignore` entries marked
@@ -717,7 +846,8 @@ mod tests {
         assert_eq!(Backend::Svn.patch(&wc, &Scope::Whole, None, None).unwrap().text, p.text);
         assert!(matches!(Backend::Svn.changes(&wc, &Scope::Branch, None), Err(Error::NoBase(_))));
         assert!(matches!(Backend::Svn.patch(&wc, &Scope::Branch, None, None), Err(Error::NoBase(_))));
-        assert!(matches!(Backend::Svn.changes(&wc, &Scope::Commits(vec![]), None), Err(Error::Svn(_))));
+        // `commits` is served since moai-0d0s.4o8: no revisions, no changes.
+        assert_eq!(Backend::Svn.changes(&wc, &Scope::Commits(vec![]), None).unwrap(), Changes::default());
         // Directory marks read no facts: every directory stands `M`.
         let marks = Backend::Svn.marks(&wc, &c, None);
         assert!(marks.dirs.values().all(|m| *m == super::super::Mark::Modified));
@@ -939,5 +1069,108 @@ mod tests {
         let outside = crate::scratch::Scratch::new("vcs-svn-none");
         let got = Backend::Svn.changes(&outside, &Scope::Working, None);
         assert!(matches!(got, Err(Error::Svn(crate::svn::Error::Failed(_)))), "{got:?}");
+    }
+
+    #[test]
+    fn a_revision_is_r_and_digits_and_nothing_else_reaches_svn() {
+        for (word, rev) in [("r1", Some(1)), ("r12", Some(12)), ("r4294967296", Some(4_294_967_296))] {
+            assert_eq!(revision(word), rev, "{word}");
+        }
+        for bad in ["r12 --diff-cmd=x", "-c", "12", "r", "r0", "r12345678901", "rx", "r-1", "r1 2", "R12", "r+1", "r１"]
+        {
+            assert_eq!(revision(bad), None, "{bad:?}");
+            let scope = Scope::Commits(vec!["r3".into(), bad.into()]);
+            // Refused before any program runs: the root need not even be a working copy.
+            let nowhere = Path::new("/nonexistent-moai-root");
+            assert!(matches!(Backend::Svn.changes(nowhere, &scope, None), Err(Error::InvalidRevision)), "{bad:?}");
+            assert!(matches!(Backend::Svn.patch(nowhere, &scope, None, None), Err(Error::InvalidRevision)), "{bad:?}");
+        }
+        // Git takes hashes only: an svn revision is no revision there.
+        let dir = crate::scratch::Scratch::new("vcs-svn-git-rev");
+        let scope = Scope::Commits(vec!["r12".into()]);
+        assert!(matches!(Backend::Git.changes(&dir, &scope, None), Err(Error::InvalidRevision)));
+        assert!(matches!(Backend::Git.patch(&dir, &scope, None, None), Err(Error::InvalidRevision)));
+    }
+
+    #[test]
+    fn commits_read_each_revision_from_the_repository() {
+        if !svn_ready() {
+            return;
+        }
+        let repo = Repo::new("vcs-svn-commits");
+        let wc = repo.checkout("trunk", "wc");
+        commit_files(&wc, &[("a.txt", "a\nb\nc\n"), ("gone.txt", "g\n")], "r2 base");
+        fs::write(wc.join("a.txt"), "a\nB\nc\nd\n").unwrap();
+        fs::write(wc.join("new.txt"), "n1\nn2\n").unwrap();
+        svn_in(&wc, &["add", "-q", "./new.txt@"]);
+        svn_in(&wc, &["rm", "-q", "./gone.txt@"]);
+        svn_in(&wc, &["commit", "-q", "-m", "r3 work"]);
+        repo.branch("x"); // r4: another branch only
+        commit_files(&wc, &[("sub/s.txt", "s\n")], "r5 sub");
+        // svn marks a file with NUL bytes binary itself when it is added.
+        commit_files(&wc, &[("bin", "\0\x01")], "r6 bin");
+        fs::write(wc.join("bin"), "\0\x02").unwrap();
+        svn_in(&wc, &["commit", "-q", "-m", "r7 binary edit"]);
+        svn_in(&wc, &["update", "-q"]);
+        // Local changes are not a revision's.
+        fs::write(wc.join("a.txt"), "local\n").unwrap();
+        let before = admin_snapshot(&wc);
+        let commits = |revs: &[&str]| Scope::Commits(revs.iter().map(|r| r.to_string()).collect());
+
+        let c = Backend::Svn.changes(&wc, &commits(&["r3"]), None).unwrap();
+        assert_eq!(paths(&c), [("a.txt", Status::Modified), ("gone.txt", Status::Deleted), ("new.txt", Status::Added)]);
+        assert_eq!((find(&c, "a.txt").adds, find(&c, "a.txt").dels), (Some(2), Some(1)));
+        assert_eq!((find(&c, "new.txt").adds, find(&c, "gone.txt").dels), (Some(2), Some(1)));
+        // The patch is svn's own `diff -c` of the root's URL at BASE, as printed.
+        let p = Backend::Svn.patch(&wc, &commits(&["r3"]), None, None).unwrap();
+        let url = format!("{}/trunk@7", repo.url);
+        let svn_says =
+            svn_in(&wc, &["diff", "--internal-diff", "--ignore-properties", "--show-copies-as-adds", "-c", "3", &url]);
+        assert_eq!(p.text, svn_says);
+        assert!(!p.truncated && !p.text.contains("local"));
+        for f in &c.files {
+            assert_eq!(
+                (Some(counted(&hunks_of(&p.text, &f.path)).0), Some(counted(&hunks_of(&p.text, &f.path)).1)),
+                (f.adds, f.dels)
+            );
+        }
+        // Narrowed: read whole, cut here.
+        let one = Backend::Svn.patch_of(&wc, &commits(&["r3"]), &["new.txt".into()], None, None).unwrap();
+        assert_eq!(crate::diff::parse(&one.text).len(), 1, "{}", one.text);
+        assert!(one.text.contains("+n2"));
+
+        // Oldest first: a file added then edited stays added, lines summed; added then removed is removed.
+        let both = Backend::Svn.changes(&wc, &commits(&["r2", "r3"]), None).unwrap();
+        assert_eq!(
+            (find(&both, "a.txt").status, find(&both, "a.txt").adds, find(&both, "a.txt").dels),
+            (Status::Added, Some(5), Some(1))
+        );
+        assert_eq!(find(&both, "gone.txt").status, Status::Deleted);
+        let p = Backend::Svn.patch(&wc, &commits(&["r2", "r3"]), None, None).unwrap();
+        assert_eq!(p.text.matches("Index: a.txt").count(), 2);
+
+        // A binary file is flagged and carries no counts.
+        let bin = Backend::Svn.changes(&wc, &commits(&["r7"]), None).unwrap();
+        assert!(find(&bin, "bin").binary && find(&bin, "bin").adds.is_none(), "{bin:?}");
+
+        // A revision of another branch, and one before the path existed, are empty — not failures.
+        assert_eq!(Backend::Svn.changes(&wc, &commits(&["r4"]), None).unwrap(), Changes::default());
+        assert!(Backend::Svn.patch(&wc, &commits(&["r4"]), None, None).unwrap().text.is_empty());
+        let sub = wc.join("sub");
+        assert_eq!(Backend::Svn.changes(&sub, &commits(&["r3"]), None).unwrap(), Changes::default());
+        assert!(Backend::Svn.patch(&sub, &commits(&["r3"]), None, None).unwrap().text.is_empty());
+        let in_sub = Backend::Svn.changes(&sub, &commits(&["r5"]), None).unwrap();
+        assert_eq!(paths(&in_sub), [("s.txt", Status::Added)], "paths are the project's own");
+
+        assert!(matches!(Backend::Svn.changes(&wc, &commits(&["r3"]), Some(Duration::ZERO)), Err(Error::Timeout)));
+        assert!(matches!(Backend::Svn.patch(&wc, &commits(&["r3"]), None, Some(Duration::ZERO)), Err(Error::Timeout)));
+        assert_eq!(admin_snapshot(&wc), before, ".svn changed");
+
+        // The repository gone: the patch is `offline`, one error.
+        fs::remove_dir_all(repo.scratch.join("repo")).unwrap();
+        let got = Backend::Svn.patch(&wc, &commits(&["r3"]), None, None);
+        assert!(matches!(got, Err(Error::Svn(crate::svn::Error::Offline(_)))), "{got:?}");
+        let got = Backend::Svn.changes(&wc, &commits(&["r3"]), None);
+        assert!(matches!(got, Err(Error::Svn(crate::svn::Error::Offline(_)))), "{got:?}");
     }
 }
