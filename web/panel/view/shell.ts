@@ -97,6 +97,8 @@ export interface Shell {
   trackerChanged(): void
   /** Move the keyboard focus into a pane of the shown tab (its view's focus()). */
   focusPane(area: Focus): void
+  /** Open the tips page (the help overlay's one row does; the header no longer does). */
+  openTips(): void
   /** Move the keyboard focus to the selected tab of the tab bar: the way out of the wiki, whose Tab cycles its links. */
   focusTabs(): void
   /** The search / filter / sort toolbar (its inputs: `/` and `SPC f` put the caret in them). */
@@ -639,6 +641,7 @@ export function mountShell(root: HTMLElement, options: ShellOptions): Shell {
     },
     trackerChanged() { if (diffId && selectedScope && selectedScope !== "working" && !(store.getState().detail.visible && width < 480) && store.getState().diff.visible && store.getState().tab !== "files" && store.getState().tab !== "wiki") readDiff(diffId, selectedScope, true).catch(() => {}) },
     focusPane,
+    openTips: () => tipsPage.open(),
     focusTabs,
     toolbar: bar,
     destroy() {

@@ -2071,6 +2071,7 @@
   "page.table.columns": "Columns 1–9",
   "page.table.helpTitle": "Shortcuts",
   "page.table.close": "Close",
+  "page.table.tips": "Show tips",
   "page.wiki.badJson": "The wiki's answer could not be read: {reason}",
   "page.wiki.listShape": "The wiki list answer is not in the expected shape.",
   "page.wiki.listNoPages": "The wiki list answer has no pages.",

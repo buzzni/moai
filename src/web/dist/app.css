@@ -265,6 +265,7 @@ button.m-refreshed:hover { background: var(--hover); color: var(--text); }
 .m-help-title { margin: 12px 0 4px; color: var(--muted); font: 600 12px var(--font); }
 .m-help-row { display: flex; align-items: center; justify-content: space-between; gap: 12px; min-height: 26px; font-size: 13px; }
 .m-help-row[data-available="false"] { opacity: .45; }
+.m-help-tips { font: inherit; background: none; border: 0; padding: 0; color: inherit; text-decoration: underline; cursor: pointer; }
 .m-help-keys, .m-kbd-hint { display: inline-flex; flex-wrap: wrap; gap: 4px; justify-content: flex-end; }
 /* Bottom-right, never top: the tab bar sits at the top of the panel and its buttons (refresh, tabs) must stay clickable. */
 .m-focus-hint { position: fixed; bottom: 8px; right: 8px; z-index: 30; padding: 4px 8px; border: 1px solid var(--border); border-radius: var(--radius-xs); background: var(--surface); color: var(--muted); font-size: 12px; text-align: center; cursor: pointer; }

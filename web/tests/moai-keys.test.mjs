@@ -739,6 +739,31 @@ test('help: sections, rows with kbd chips, unavailable rows dimmed', () => {
   assert.ok([...help.el.querySelectorAll('kbd')].some((k) => k.textContent.startsWith('Ctrl-')))
 })
 
+test('help: the tips row opens the tips page and closes the help; without `tips` there is no row (moai-q16k)', () => {
+  const dom = new JSDOM('<!doctype html><body><button id="before">x</button></body>')
+  const doc = dom.window.document
+  let opened = 0
+  const bare = createHelp(doc, { platform: 'other' })
+  doc.body.append(bare.el)
+  bare.open('browse', browse())
+  assert.equal(bare.el.querySelector('.m-help-tips'), null)
+  bare.close()
+  const help = createHelp(doc, { platform: 'other', tips: { label: 'Show tips', open: () => { opened++; assert.equal(help.isOpen(), false, 'closed before the tips open') } } })
+  doc.body.append(help.el)
+  doc.getElementById('before').focus()
+  help.open('browse', browse())
+  const row = help.el.querySelector('button.m-help-tips')
+  assert.equal(row.textContent, 'Show tips')
+  // Tab reaches it: overlay -> close button -> tips row.
+  const tab = () => help.el.dispatchEvent(new dom.window.KeyboardEvent('keydown', { key: 'Tab', bubbles: true, cancelable: true }))
+  tab(); tab()
+  assert.equal(doc.activeElement, row)
+  row.click()
+  assert.equal(opened, 1)
+  assert.equal(help.isOpen(), false)
+  assert.equal(doc.activeElement, doc.getElementById('before'))
+})
+
 test('help: Esc and the close button close it and call onClose', () => {
   const { document, KeyboardEvent } = new JSDOM('<!doctype html><body></body>').window
   let closed = 0

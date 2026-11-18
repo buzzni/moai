@@ -297,6 +297,8 @@ export interface KeyTableCopy {
   /** The help overlay's head. */
   helpTitle: string
   close: string
+  /** The help overlay's one row that opens the tips page. */
+  tips: string
 }
 
 export interface WikiCopy {

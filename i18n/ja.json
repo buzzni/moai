@@ -286,6 +286,7 @@
   "page.table.columns": "1〜9 番目の列",
   "page.table.helpTitle": "ショートカット",
   "page.table.close": "閉じる",
+  "page.table.tips": "ヒントを見る",
   "page.wiki.badJson": "Wiki の応答を読めませんでした: {reason}",
   "page.wiki.listShape": "Wiki 一覧の応答の形式が正しくありません。",
   "page.wiki.listNoPages": "Wiki 一覧の応答に pages がありません。",

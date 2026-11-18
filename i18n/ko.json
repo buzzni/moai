@@ -2071,6 +2071,7 @@
   "page.table.columns": "1~9번째 칸",
   "page.table.helpTitle": "단축키",
   "page.table.close": "닫기",
+  "page.table.tips": "팁 보기",
   "page.wiki.badJson": "위키 응답을 읽지 못했습니다: {reason}",
   "page.wiki.listShape": "위키 목록 응답의 꼴이 맞지 않습니다.",
   "page.wiki.listNoPages": "위키 목록 응답에 pages가 없습니다.",
