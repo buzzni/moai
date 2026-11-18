@@ -24,7 +24,7 @@ A working copy is one checkout. moai reads the layout of its URL (`svn info`'s r
 | Scope | Compares | Contacts the server |
 |---|---|---|
 | `working` | `BASE` against the working copy, untracked files included | No |
-| `commits` | each revision whose log message names the issue id (tracker commits excluded) against the revision before it, along this URL's history | Yes |
+| `commits` | each revision whose log message names the issue id (tracker commits excluded) against the revision before it, along this URL's history. A message names an id as a git commit message does: in its first paragraph, or in a `Refs:`, `Closes:` or `Fixes:` line | Yes |
 | `branch` | the point where `branches/<x>` was copied from, against the working copy's `BASE` | Yes |
 | `whole` | the same fork point against the working copy; when the fork point is unknown, the same as `working` | Only on a branch copied from somewhere |
 
@@ -81,7 +81,7 @@ Subversion can answer "which revisions mention this id" only by asking the serve
 
 - Without a usable location moai reads the log each time and caches nothing.
 - The file is safe to delete. It is built again from the server, and a damaged or hand-edited one is thrown away the same way. Nothing in `.moai/` records it.
-- It holds the table (revision, title, the ids mentioned), the fork points of branches, and when the table was last found complete. It does not hold patches: each diff reads the server again.
+- It holds every revision's title and its `Refs:`, `Closes:` and `Fixes:` lines, the fork points of branches, and when the table was last found complete. Ids are matched when the table is read, so an id made later is found too. It does not hold patches: each diff reads the server again.
 - The first fill reads the log 2,000 revisions at a time and keeps each piece, so an interrupted fill is continued by the next call. Until a fill has completed once, the table answers nothing, since "no revision mentions this id" would be a guess; the read says it is still filling (`timeout`).
 - Once complete, the server is asked for new revisions at most once a minute. A revision whose message is edited after the table has read it keeps the message read the first time until the file is deleted.
 - A branch's `branch` and `whole` ask for the fork point once and keep it, so the explorer's refreshes do not repeat that call.

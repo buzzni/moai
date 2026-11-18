@@ -14,10 +14,13 @@
 //!   answered from, since an id's revisions may sit in the part not read yet
 //! - `tried_at`: when refreshing a complete table last failed (the server out of reach or too slow). The server is
 //!   then asked again only [`POLL_SECS`] later too, so a server that does not answer is not waited on at every read
-//! - `revs`: the revisions whose subject or `Refs:`·`Closes:`·`Fixes:` lines carry an id-shaped word, with the
-//!   subject and those words. Words are read by the rule Git's commit table uses ([`crate::git::words`],
-//!   [`crate::git::trailed`]) and kept when [`crate::git::ids_in`] takes them, whatever project they belong to —
-//!   one repository may hold several projects and ids may be made later
+//! - `revs`: every revision whose message has a word an id could equal, with its subject and its `Refs:`·`Closes:`·
+//!   `Fixes:` lines (`trailers`, left out when there are none). **An id is found exactly as Git's commit table finds
+//!   it** (epic-end review finding 9): the subject is the message's first paragraph joined into one line, as `git log
+//!   %s` gives it, and [`crate::git::named_in`] matches the id against its words and the trailer lines' words — any
+//!   word equal to the id, not only words that pass the id format check (moai-ynhj). That is why no word is chosen
+//!   when the table is filled: one repository may hold several projects, ids may be made later, and an id that fails
+//!   the format check is still an id. Format 1 kept only id-shaped words of the first line; such a file is rebuilt
 //! - `forks`: how each branch root came to be (moai-0d0s.x27), keyed by its repository path (`/branches/x`):
 //!   `{"created": <the revision that made it>, "from": "/trunk", "rev": <the copy's source revision>}`, or only
 //!   `created` for a root made without a copy. Asked of the server once; an entry out of shape is dropped and asked
@@ -32,19 +35,23 @@ use serde::{Deserialize, Serialize};
 use std::ffi::OsString;
 use std::path::{Path, PathBuf};
 
-/// The file's format. A file of another version is rebuilt, not read.
-pub(crate) const VERSION: u64 = 1;
+/// The file's format. A file of another version is rebuilt, not read. 2: every revision with its subject paragraph and
+/// trailer lines, matched at read time as Git matches (1 kept id-shaped words of the first line only).
+pub(crate) const VERSION: u64 = 2;
 /// Revisions asked of the server in one `log` while filling.
 pub(crate) const CHUNK: u64 = 2_000;
 /// The least time between two asks of the server for new revisions.
 pub(crate) const POLL_SECS: i64 = 60;
 
-/// A revision that names ids.
+/// A revision as the table keeps it: what [`crate::git::named_in`] reads of a Git commit.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub(crate) struct Rev {
     pub rev: u64,
+    /// The first paragraph as one line — Git's `%s`.
     pub subject: String,
-    pub tokens: Vec<String>,
+    /// The body's `Refs:`·`Closes:`·`Fixes:` lines, one per line as written.
+    #[serde(default, skip_serializing_if = "String::is_empty")]
+    pub trailers: String,
 }
 
 /// The table as the file holds it.
@@ -97,8 +104,8 @@ impl Table {
     }
 
     /// The table these bytes hold, or `None` when they are not one this binary can trust for `uuid`: unreadable,
-    /// another version or repository, or a value out of shape (a revision past `through`, out of order, a word that is
-    /// no id, an unreadable time).
+    /// another version or repository, or a value out of shape (a revision past `through`, out of order, one that names
+    /// nothing, an unreadable time).
     pub(crate) fn of_bytes(bytes: &[u8], uuid: &str) -> Option<Table> {
         let table: Table = serde_json::from_slice(bytes).ok()?;
         let sane = table.version == VERSION
@@ -107,11 +114,7 @@ impl Table {
                 .iter()
                 .all(|at| at.as_deref().is_none_or(|t| crate::model::parse_rfc3339(t).is_some()))
             && table.revs.windows(2).all(|w| w[0].rev < w[1].rev)
-            && table.revs.iter().all(|r| {
-                (1..=table.through).contains(&r.rev)
-                    && !r.tokens.is_empty()
-                    && r.tokens.iter().all(|t| crate::git::ids_in(t).eq([t.as_str()]))
-            });
+            && table.revs.iter().all(|r| (1..=table.through).contains(&r.rev) && r.names_some());
         sane.then_some(table)
     }
 
@@ -157,10 +160,11 @@ impl Table {
     /// The revisions that name `id`, newest first — the order [`crate::git::commits_within`] gives. A revision is
     /// written `r<number>`; tracker revisions are marked, not dropped.
     pub(crate) fn commits(&self, id: &str) -> Vec<crate::git::Commit> {
+        let known = std::collections::HashSet::from([id]);
         self.revs
             .iter()
             .rev()
-            .filter(|r| r.tokens.iter().any(|t| t == id))
+            .filter(|r| !crate::git::named_in(&r.subject, &r.trailers, &known).is_empty())
             .map(|r| crate::git::Commit {
                 hash: format!("r{}", r.rev),
                 subject: r.subject.clone(),
@@ -170,18 +174,50 @@ impl Table {
     }
 }
 
-/// One log message read: its subject (the first line) and the ids it names, by Git's rule — the subject's words
-/// and the words of its `Refs:`·`Closes:`·`Fixes:` lines, never a word of plain body text. `None` when it names none.
-pub(crate) fn rev_of(rev: u64, message: &str) -> Option<Rev> {
-    let (subject, body) = message.split_once('\n').unwrap_or((message, ""));
-    let subject = subject.trim_end_matches('\r');
-    let mut tokens: Vec<String> = Vec::new();
-    for t in crate::git::ids_in(subject).chain(crate::git::trailed(body).flat_map(crate::git::ids_in)) {
-        if !tokens.iter().any(|k| k == t) {
-            tokens.push(t.to_owned());
-        }
+impl Rev {
+    /// Whether any word of the revision could name an id — [`crate::git::named_in`] with every word known.
+    fn names_some(&self) -> bool {
+        crate::git::words(&self.subject).chain(crate::git::trailed(&self.trailers)).next().is_some()
     }
-    (!tokens.is_empty()).then(|| Rev { rev, subject: subject.to_owned(), tokens })
+}
+
+/// One log message read as Git reads a commit's: the subject is the first paragraph — leading blank lines skipped,
+/// each line's trailing whitespace dropped, the lines joined by one space, as `%s` gives it — and the body is what
+/// follows the blank lines after it, of which only the `Refs:`·`Closes:`·`Fixes:` lines are kept
+/// ([`crate::git::trailed`] picks them). `None` when no word of either could name an id.
+pub(crate) fn rev_of(rev: u64, message: &str) -> Option<Rev> {
+    let (subject, body) = subject_and_body(message);
+    let trailers: Vec<&str> = body.lines().filter(|l| crate::git::trailed(l).next().is_some()).collect();
+    let r = Rev { rev, subject, trailers: trailers.join("\n") };
+    r.names_some().then_some(r)
+}
+
+/// Git's whitespace (`isspace` in its own `ctype.c`): space, tab, CR, LF — not VT or FF.
+const SPACE: [char; 4] = [' ', '\t', '\r', '\n'];
+
+/// `s` past its leading blank lines — Git's `skip_blank_lines`.
+fn skip_blank(mut s: &str) -> &str {
+    while let Some(line) = s.split_inclusive('\n').next().filter(|l| l.trim_end_matches(SPACE).is_empty()) {
+        s = &s[line.len()..];
+    }
+    s
+}
+
+/// Git's `%s` and `%b` of a message (`pretty.c`: `format_subject`, `skip_blank_lines`): a blank line is one of
+/// [`SPACE`] only.
+fn subject_and_body(message: &str) -> (String, &str) {
+    let mut rest = skip_blank(message);
+    let mut subject = Vec::new();
+    // The line that ends the paragraph is consumed with it, as Git's `format_subject` does.
+    while let Some(line) = rest.split_inclusive('\n').next() {
+        rest = &rest[line.len()..];
+        let line = line.trim_end_matches(SPACE);
+        if line.is_empty() {
+            break;
+        }
+        subject.push(line);
+    }
+    (subject.join(" "), skip_blank(rest))
 }
 
 /// A branch root's key in `forks`: its repository path as `log` prints it, `/branches/x` — decoded, not a URL.
@@ -292,7 +328,7 @@ fn private_dir(dir: &Path) -> std::io::Result<()> {
 /// What one `log` over a range gave.
 #[derive(Debug)]
 pub(crate) enum Fetched {
-    /// The revisions in the range that name ids.
+    /// The revisions in the range that could name an id ([`rev_of`]).
     Revs(Vec<Rev>),
     /// The output passed its limit: ask a smaller range.
     Cut,
@@ -323,7 +359,7 @@ pub(crate) fn fill(
         let to = head.min(table.through.saturating_add(size));
         match fetch(from, to)? {
             Fetched::Revs(mut revs) => {
-                revs.retain(|r| (from..=to).contains(&r.rev) && !r.tokens.is_empty());
+                revs.retain(|r| (from..=to).contains(&r.rev) && r.names_some());
                 revs.sort_by_key(|r| r.rev);
                 revs.dedup_by_key(|r| r.rev);
                 table.revs.extend(revs);
@@ -397,25 +433,32 @@ pub(crate) mod tests {
     }
 
     #[test]
-    fn the_table_takes_subject_and_trailer_ids_only() {
+    fn a_message_is_read_as_git_reads_a_commit() {
         let r = rev_of(3, "feat: x (moai-ab12)\n\nnot moai-cd34 in prose\nRefs: moai-ef56\n  closes: moai-gh78.\n")
-            .expect("names ids");
+            .unwrap();
         assert_eq!(r.subject, "feat: x (moai-ab12)");
-        assert_eq!(r.tokens, ["moai-ab12", "moai-ef56", "moai-gh78"]);
-        assert!(rev_of(4, "plain\n\nmentions moai-ab12 in the body\n").is_none(), "a body id is not taken");
-        let only_trailer = rev_of(5, "plain\n\nRefs: moai-ab12\n").unwrap();
-        assert_eq!(only_trailer.tokens, ["moai-ab12"]);
-        assert!(rev_of(6, "flags --json and -c only").is_none());
-        assert_eq!(rev_of(7, "x\r\nRefs: moai-ab12\r\n").unwrap().subject, "x");
+        assert_eq!(r.trailers, "Refs: moai-ef56\n  closes: moai-gh78.");
+        // The subject is the first paragraph on one line, as `%s`: leading blank lines skipped, trailing space dropped.
+        let wrapped = rev_of(4, "\n \nfeat: a long  \r\nsubject (moai-ab12)\t\n\n\n\nbody\nFixes: x-1\n").unwrap();
+        assert_eq!(wrapped.subject, "feat: a long subject (moai-ab12)");
+        assert_eq!(wrapped.trailers, "Fixes: x-1");
+        // A paragraph's own `Refs:` line is subject, as in Git.
+        assert_eq!(rev_of(7, "x\r\nRefs: moai-ab12\r\n").unwrap().subject, "x Refs: moai-ab12");
+        assert_eq!(rev_of(8, "plain\n\nmentions moai-ab12\n").unwrap().trailers, "", "body prose is not kept");
+        assert!(rev_of(5, "").is_none() && rev_of(6, " \n\n:: !? \n").is_none(), "no word, nothing to name");
 
         let mut t = Table::new(UUID);
-        t.through = 9;
+        t.through = 12;
         for (rev, msg) in [
             (2, "work on moai-ab12.xyz"),
             (3, "branch worktree-moai-ab12"),
             (4, "chore(tracker): pick moai-ab12"),
             (5, "feat: thing (moai-ab12)"),
             (6, "x\n\nRefs: moai-ab12"),
+            (8, "plain\n\nmentions moai-ab12 in the body\n"),
+            (9, "feat: wrapped\nsubject (moai-ab12)"),
+            (10, "fix: an odd id (Legacy_ID9)"),
+            (11, "flags --json and -c only"),
         ] {
             t.revs.push(rev_of(rev, msg).unwrap());
         }
@@ -423,10 +466,13 @@ pub(crate) mod tests {
         let hashes: Vec<_> = got.iter().map(|c| (c.hash.as_str(), c.tracker)).collect();
         assert_eq!(
             hashes,
-            [("r6", false), ("r5", false), ("r4", true)],
-            "newest first, a child or branch name is not the id"
+            [("r9", false), ("r6", false), ("r5", false), ("r4", true)],
+            "newest first, a child or branch name is not the id, a body mention is not, a wrapped subject's is"
         );
         assert_eq!(t.commits("moai-ab12.xyz")[0].hash, "r2");
+        assert!(!crate::id::is_valid("Legacy_ID9"));
+        assert_eq!(t.commits("Legacy_ID9")[0].hash, "r10", "an id that fails the format check is still found");
+        assert_eq!(t.commits("--json")[0].hash, "r11", "any word equal to the id, as Git's table");
     }
 
     #[test]
@@ -488,16 +534,16 @@ pub(crate) mod tests {
         for bad in [
             "{".to_owned(),
             String::new(),
-            good.replace("\"version\":1", "\"version\":2"),
+            good.replace("\"version\":2", "\"version\":1"),
             good.replace("\"rev\":12", "\"rev\":13"),
             good.replace("\"rev\":12", "\"rev\":\"12\""),
             good.replace("\"rev\":3", "\"rev\":-3"),
             good.replace("\"rev\":3", "\"rev\":0"),
             good.replace("\"rev\":12", "\"rev\":3"),
-            good.replace("\"moai-cd34\"", "\"--diff-cmd=x\""),
-            good.replace("[\"moai-cd34\"]", "[]"),
+            good.replace("\"subject\":\"b\",\"trailers\":\"Fixes: moai-cd34\"", "\"subject\":\" \""),
             good.replace(&at(0), "yesterday"),
         ] {
+            assert_ne!(bad, good, "the case changes nothing");
             assert!(Table::of_bytes(bad.as_bytes(), UUID).is_none(), "{bad}");
         }
     }

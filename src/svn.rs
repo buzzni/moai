@@ -1275,6 +1275,42 @@ pub(crate) mod tests {
         assert!(matches!(table_within(&wc, Some(Duration::ZERO), None, T0, 2, SERVER_TIMEOUT), Err(Error::Timeout)));
     }
 
+    /// **The same messages find the same commits under svn as under Git** (epic-end review finding 9): an id on the
+    /// second line of a wrapped subject, an id that fails the format check, a trailer, and never body prose — and the
+    /// subject is the one Git shows. Both read real commits, so a rule that drifts on either side turns this red.
+    #[test]
+    fn the_same_messages_name_the_same_ids_as_git() {
+        if !svn_ready() {
+            return;
+        }
+        let messages = [
+            "feat: a subject wrapped\nonto a second line (moai-ab12)\n\nbody\n",
+            "fix: an odd id (Legacy_ID9)",
+            "plain\n\nmentions moai-ab12 and Legacy_ID9 in prose\n",
+            "chore: tidy  \n\n\nRefs: moai-ab12, Legacy_ID9\n",
+            "\n\nfeat: after blank lines (moai-ab12)\nRefs: Legacy_ID9\n",
+        ];
+        let repo = Repo::new("svn-same-as-git");
+        let wc = repo.checkout("trunk", "wc");
+        for (n, msg) in messages.iter().enumerate() {
+            commit_files(&wc, &[(&format!("f{n}"), "x\n")], msg);
+        }
+        let git = Scratch::new("svn-same-as-git-git");
+        crate::git::tests::run_git(&git, None, &["init", "-q"]);
+        for msg in messages {
+            crate::git::tests::run_git(&git, None, &["commit", "-q", "--allow-empty", "-m", msg]);
+        }
+        let cache_dir = Scratch::new("svn-same-as-git-cache");
+        for id in ["moai-ab12", "Legacy_ID9"] {
+            let svn = cache::tests::with_dir(Some(&cache_dir), || commits_within(&wc, id, None)).expect("svn");
+            let git = crate::git::commits_within(&git, id, None).expect("git ran").expect("git");
+            let subjects = |cs: &[crate::git::Commit]| cs.iter().map(|c| c.subject.clone()).collect::<Vec<_>>();
+            assert_eq!(subjects(&svn), subjects(&git), "{id}");
+            assert!(!svn.is_empty(), "{id}");
+        }
+        assert!(!crate::id::is_valid("Legacy_ID9"), "the odd id must fail the format check");
+    }
+
     #[test]
     fn the_table_asks_the_server_once_a_minute_and_reads_only_what_is_new() {
         if !svn_ready() {

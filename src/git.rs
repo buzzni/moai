@@ -664,7 +664,7 @@ pub fn table(root: &Path, ids: &[&str]) -> Result<BTreeMap<String, Vec<Commit>>,
 
 /// 이 커밋이 대는 id 들 — 제목의 낱말과 **트레일러 줄의 낱말**을 같은 자로 본다(moai-dig5).
 /// 한 커밋이 같은 id 를 두 번 적어도 한 번만 든다.
-fn named_in<'a>(subject: &'a str, body: &'a str, known: &std::collections::HashSet<&str>) -> Vec<&'a str> {
+pub(crate) fn named_in<'a>(subject: &'a str, body: &'a str, known: &std::collections::HashSet<&str>) -> Vec<&'a str> {
     let mut named: Vec<&str> = Vec::new();
     for id in words(subject).chain(trailed(body)).filter(|w| known.contains(w)) {
         if !named.contains(&id) {
